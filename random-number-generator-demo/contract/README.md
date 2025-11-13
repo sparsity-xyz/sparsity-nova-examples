@@ -59,5 +59,5 @@ npx hardhat verify --network baseSepolia <YOUR_CONTRACT_ADDRESS>
 
 ## register operator
 ```
-OPERATOR_ADDRESS=<operator_address> npx hardhat run scripts/register-operator.js --network --network baseSepolia
+OPERATOR_ADDRESS=<operator_address> npx hardhat run scripts/register-operator.js --network baseSepolia
 ```
