@@ -1,0 +1,25 @@
+{
+  "name": "random-number-generator",
+  "version": "1.0.0",
+  "description": "True Random Number Generator with off-chain service",
+  "scripts": {
+    "compile": "hardhat compile",
+    "test": "hardhat test",
+    "node": "hardhat node",
+    "deploy:local": "hardhat run scripts/deploy-rng.js --network localhost",
+    "deploy:sepolia": "hardhat run scripts/deploy-rng.js --network baseSepolia",
+    "fulfill:local": "hardhat run scripts/fulfill.js --network localhost",
+    "test:local": "hardhat run test/RNG.test.js --network localhost",
+    "test:sepolia": "hardhat run test/RNG.test.js --network baseSepolia",
+    "check:local": "hardhat run scripts/check-results.js --network localhost",
+    "check:sepolia": "hardhat run scripts/check-results.js --network baseSepolia"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^4.0.0",
+    "dotenv": "^16.3.1",
+    "hardhat": "^2.19.0"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "^5.0.0"
+  }
+}
