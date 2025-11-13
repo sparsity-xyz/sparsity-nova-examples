@@ -123,7 +123,7 @@ function updateBackendConfig(contractAddress, network) {
   const rpcUrls = {
     localhost: "http://127.0.0.1:8545",
     hardhat: "http://127.0.0.1:8545",
-    baseSepolia: "https://sepolia.base.org",
+    baseSepolia: process.env.BASE_SEPOLIA_RPC,
     base: "https://mainnet.base.org"
   };
 

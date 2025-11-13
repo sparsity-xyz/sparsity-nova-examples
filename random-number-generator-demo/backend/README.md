@@ -26,5 +26,5 @@ the output should be
     "processed_requests": 0
 }
 ```
-### register and deposit the address
+### deposit and register the address
 use `operator` above

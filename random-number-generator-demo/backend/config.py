@@ -5,8 +5,8 @@ from eth_account import Account
 
 
 class Config:
-    RPC_URL = "https://sepolia.base.org"
-    CONTRACT_ADDRESS = "0x41C16DF1E1D5cB71Fa5aaDBC6cE8dd0bDee22cCf"
+    RPC_URL = "https://base-sepolia-public.nodies.app"
+    CONTRACT_ADDRESS = "0xb82560bcbC46666D74FfC5f5685BE92C03835746"
 
     POLL_INTERVAL = 10  # 秒
     FROM_BLOCK = "latest"
