@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import secrets
 from typing import List, Optional
 
 import uvicorn
@@ -11,6 +10,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.requests import Request
 
 from config import Config
+from enclave import Enclave
 
 
 logging.basicConfig(
@@ -62,6 +62,7 @@ class RandomNumberGenerator:
             version="1.0.0"
         )
         self.init_router()
+        self.enclaver = Enclave()
 
     def init_router(self):
         self.app.add_api_route("/", self.status, methods=["GET"])
@@ -84,29 +85,6 @@ class RandomNumberGenerator:
 
     async def request_info(self, request_id):
         return self.get_request_info(int(request_id))
-
-    def generate_random_numbers(self, min_val: int, max_val: int, count: int) -> List[int]:
-        """
-        Generate cryptographically secure random numbers
-
-        Args:
-            min_val: Minimum value (inclusive)
-            max_val: Maximum value (exclusive)
-            count: Number of random numbers
-
-        Returns:
-            List of random numbers
-        """
-        random_numbers = []
-        range_size = max_val - min_val
-
-        for _ in range(count):
-            # Use secrets module to generate cryptographically secure random numbers
-            random_num = min_val + secrets.randbelow(range_size)
-            random_numbers.append(random_num)
-
-        logging.info(f"🎲 Generated {count} random numbers: {random_numbers}")
-        return random_numbers
 
     def get_request_info(self, request_id: int) -> dict:
         """Get request information from contract"""
@@ -246,8 +224,10 @@ class RandomNumberGenerator:
             logging.error(f"❌ Error checking request status: {e}")
             return
 
+        # set seed first
+        self.enclaver.set_random_seed()
         # Generate random numbers
-        random_numbers = self.generate_random_numbers(min_val, max_val, count)
+        random_numbers = self.enclaver.generate_random_numbers(min_val, max_val, count)
 
         # Fulfill to contract
         try:
