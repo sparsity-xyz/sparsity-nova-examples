@@ -66,7 +66,7 @@ deploy-enclave:
 	@echo "Starting enclave..."
 	$(SSH_CMD) "docker stop btc-oracle 2>/dev/null || true && \
 		docker rm btc-oracle 2>/dev/null || true && \
-		docker run -d --name btc-oracle -p 8000:8000 $(ENCLAVE_IMAGE)"
+		docker run -d --name btc-oracle -p 8000:8000 --privileged --device=/dev/nitro_enclaves:/dev/nitro_enclaves $(ENCLAVE_IMAGE)"
 	@EC2_IP=$$(echo $(EC2_HOST) | cut -d'@' -f2); \
 	echo "Enclave deployed! Access at http://$$EC2_IP:8000"
 
@@ -82,8 +82,8 @@ fund-enclave:
 	@EC2_IP=$$(echo $(EC2_HOST) | cut -d'@' -f2); \
 	ENCLAVE_ADDR=$$(curl -s http://$$EC2_IP:8000/ | jq -r '.enclave_address'); \
 	if [ "$$ENCLAVE_ADDR" = "null" ] || [ -z "$$ENCLAVE_ADDR" ]; then echo "Error: Could not get enclave address"; exit 1; fi; \
-	echo "Funding enclave wallet: $$ENCLAVE_ADDR with 0.01 ETH..."; \
-	cast send --rpc-url $(RPC_URL) --private-key $(PRIVATE_KEY) $$ENCLAVE_ADDR --value 0.01ether
+	echo "Funding enclave wallet: $$ENCLAVE_ADDR with 0.001 ETH..."; \
+	cast send --rpc-url $(RPC_URL) --private-key $(PRIVATE_KEY) $$ENCLAVE_ADDR --value 0.001ether
 
 # Deploy smart contract (step 1)
 deploy-contract: build-contract
