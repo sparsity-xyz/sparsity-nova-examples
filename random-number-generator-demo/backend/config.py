@@ -6,7 +6,7 @@ class Config:
     RPC_URL = "https://base-sepolia-public.nodies.app"
     CONTRACT_ADDRESS = "0xb82560bcbC46666D74FfC5f5685BE92C03835746"
 
-    ENLAVER_ENDPOINT= "http://localhost:9000"
+    ENLAVER_ENDPOINT= "http://127.0.0.1:18000"
 
     POLL_INTERVAL = 10  # second
     FROM_BLOCK = "latest"

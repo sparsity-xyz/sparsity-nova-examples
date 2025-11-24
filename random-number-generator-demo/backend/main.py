@@ -5,7 +5,6 @@ from typing import List, Optional
 import uvicorn
 from web3 import Web3
 from web3.contract import Contract
-from eth_account.signers.local import LocalAccount
 from fastapi import FastAPI, HTTPException
 from fastapi.requests import Request
 

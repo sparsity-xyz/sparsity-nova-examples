@@ -5,7 +5,7 @@ from web3 import Web3
 
 
 class Enclave:
-    def __init__(self, endpoint="http://127.0.0.1:9000"):
+    def __init__(self, endpoint="http://127.0.0.1:18000"):
         self.endpoint = endpoint
 
     def eth_address(self):
