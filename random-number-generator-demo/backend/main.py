@@ -37,19 +37,21 @@ class RandomNumberGenerator:
             abi=Config.CONTRACT_ABI,
         )
 
+        self.enclaver = Enclave()
+
         # Operator account
-        self.operator: LocalAccount = Config.OPERATOR
-        logging.info(f"🔑 Operator: {self.operator.address}")
+        self.operator_address = Web3.to_checksum_address(self.enclaver.eth_address())
+        logging.info(f"🔑 Operator: {self.operator_address}")
 
         # Check balance
-        balance = self.w3.eth.get_balance(self.operator.address)
+        balance = self.w3.eth.get_balance(self.operator_address)
         logging.info(f"💰 Operator balance: {Web3.from_wei(balance, 'ether')} ETH")
 
         if balance == 0:
             logging.warning("⚠️  Operator has zero balance!")
 
         # Verify operator permission
-        self.is_operator = self.contract.functions.isOperator(self.operator.address).call()
+        self.is_operator = self.contract.functions.isOperator(self.operator_address).call()
         if not self.is_operator:
             logging.info("✅ Operator authorized")
 
@@ -62,7 +64,6 @@ class RandomNumberGenerator:
             version="1.0.0"
         )
         self.init_router()
-        self.enclaver = Enclave()
 
     def init_router(self):
         self.app.add_api_route("/", self.status, methods=["GET"])
@@ -77,8 +78,8 @@ class RandomNumberGenerator:
             "status": "running",
             "is_operator": self.is_operator,
             "contract_address": self.contract_address,
-            "operator": self.operator.address,
-            "operator_balance": round(self.w3.eth.get_balance(self.operator.address) / 1e18, 6),
+            "operator": self.operator_address,
+            "operator_balance": round(self.w3.eth.get_balance(self.operator_address) / 1e18, 6),
             "processed_requests": len(self.processed_requests),
             "explorer": f"https://sepolia.basescan.org/address/{self.contract_address}"
         }
@@ -109,6 +110,14 @@ class RandomNumberGenerator:
         except Exception as e:
             raise HTTPException(status_code=404, detail=f"Request not found: {e}")
 
+    def estimate_priority_from_fee_history(self, blocks: int = 5, percentile: float = 50):
+        try:
+            hist = self.w3.eth.fee_history(blocks, 'pending', [percentile / 100])
+            reward = hist['reward'][-1][0]  # 单位 wei
+            return int(reward)
+        except Exception:
+            return self.w3.to_wei(2, 'gwei')
+
     async def fulfill_random_number(
             self,
             request_id: int,
@@ -126,7 +135,7 @@ class RandomNumberGenerator:
         """
         try:
             # Get nonce
-            nonce = self.w3.eth.get_transaction_count(self.operator.address)
+            nonce = self.w3.eth.get_transaction_count(self.operator_address)
 
             # Build transaction function
             function = self.contract.functions.fulfillRandomNumber(
@@ -136,32 +145,31 @@ class RandomNumberGenerator:
 
             # Estimate gas
             try:
-                gas_estimate = function.estimate_gas({"from": self.operator.address})
+                gas_estimate = function.estimate_gas({"from": self.operator_address})
                 gas_limit = int(gas_estimate * 1.2)  # Add 20% buffer
             except Exception as e:
                 logging.warning(f"⚠️  Gas estimation failed: {e}, using default")
                 gas_limit = 300000
 
-            # Get gas price
-            gas_price = self.w3.eth.gas_price
+            # Get gas
+            priority_from_hist = self.estimate_priority_from_fee_history(blocks=5, percentile=50)
+            base_fee = self.w3.eth.get_block('pending')['baseFeePerGas']
+            max_fee = base_fee * 2 + priority_from_hist
 
             # Build transaction
             transaction = function.build_transaction({
-                "from": self.operator.address,
                 "nonce": nonce,
                 "gas": gas_limit,
-                "gasPrice": gas_price,
+                "maxPriorityFeePerGas": priority_from_hist,
+                "maxFeePerGas": max_fee,
                 "chainId": self.chain_id,
             })
 
             # Sign transaction
-            signed_txn = self.w3.eth.account.sign_transaction(
-                transaction,
-                private_key=self.operator.key
-            )
+            signed_txn = self.enclaver.sign_tx(transaction)
 
             # Send transaction
-            tx_hash = self.w3.eth.send_raw_transaction(signed_txn.raw_transaction)
+            tx_hash = self.w3.eth.send_raw_transaction(signed_txn["raw_transaction"])
             tx_hash_hex = tx_hash.hex()
 
             logging.info(f"📤 Fulfilling request {request_id}, tx: {tx_hash_hex}")
@@ -228,7 +236,6 @@ class RandomNumberGenerator:
         self.enclaver.set_random_seed()
         # Generate random numbers
         random_numbers = self.enclaver.generate_random_numbers(min_val, max_val, count)
-
         # Fulfill to contract
         try:
             tx_hash = await self.fulfill_random_number(request_id, random_numbers)
@@ -265,7 +272,7 @@ class RandomNumberGenerator:
         while True:
             try:
                 if not self.is_operator:
-                    self.is_operator = self.contract.functions.isOperator(self.operator.address).call()
+                    self.is_operator = self.contract.functions.isOperator(self.operator_address).call()
                     logging.info("Wait for register operator...")
                 else:
                     # Get new events
@@ -287,7 +294,7 @@ class RandomNumberGenerator:
         logging.info("🚀 RNG Off-Chain Service Starting...")
         logging.info("=" * 70)
         logging.info(f"Contract:  {self.contract_address}")
-        logging.info(f"Operator:  {self.operator.address}")
+        logging.info(f"Operator:  {self.operator_address}")
         logging.info(f"Chain ID:  {self.chain_id}")
         logging.info("=" * 70 + "\n")
 

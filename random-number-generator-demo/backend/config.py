@@ -13,15 +13,6 @@ class Config:
 
     DEPOSIT_AMOUNT = 0.1 # ether
 
-    pk = os.getenv("PRIVATE_KEY", "")
-    if pk == "":
-        OPERATOR = Account.create()
-    else:
-        OPERATOR = Account.from_key(pk)
-
-    OPERATOR_PRIVATE_KEY = OPERATOR.key.hex()
-    OPERATOR_ADDRESS = OPERATOR.address
-
     @staticmethod
     def load_abi():
         abi_path = Path(__file__).parent / "abi.json"
