@@ -63,10 +63,11 @@ deploy-enclave:
 	$(SSH_CMD) "cd ~/btc-oracle && docker build -t $(APP_IMAGE) ."
 	@echo "Building enclave image on EC2..."
 	$(SSH_CMD) "cd ~/btc-oracle && ~/enclaver build -f enclaver.yaml"
-	@echo "Starting enclave..."
-	$(SSH_CMD) "docker stop btc-oracle 2>/dev/null || true && \
-		docker rm btc-oracle 2>/dev/null || true && \
-		docker run -d --name btc-oracle -p 8000:8000 --privileged --device=/dev/nitro_enclaves:/dev/nitro_enclaves $(ENCLAVE_IMAGE)"
+	@echo "Stopping any running containers..."
+	$(SSH_CMD) "docker stop \$$(docker ps -q) 2>/dev/null || true; docker rm \$$(docker ps -aq) 2>/dev/null || true"
+	@echo "Starting enclave with enclaver run..."
+	$(SSH_CMD) "nohup ~/enclaver run --publish 8000:8000 $(ENCLAVE_IMAGE) > /tmp/enclave.log 2>&1 &"
+	@sleep 3
 	@EC2_IP=$$(echo $(EC2_HOST) | cut -d'@' -f2); \
 	echo "Enclave deployed! Access at http://$$EC2_IP:8000"
 

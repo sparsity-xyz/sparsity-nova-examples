@@ -13,6 +13,7 @@ egress:
   allow:
     - "api.coingecko.com"
     - "sepolia.base.org"
+    - "base-sepolia.g.alchemy.com"
 api:
   listen_port: 9000
 aux_api:

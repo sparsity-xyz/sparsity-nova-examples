@@ -1,6 +1,11 @@
 {
   "rpc_url": "https://sepolia.base.org",
+  "bundler_url": "https://base-sepolia.g.alchemy.com/v2/a1fOeVxSBn-zRQqN7DXCZ",
   "contract_address": "0x68b014fBf6bD71D351cD18c2089ca66396Fab61d",
+  "entry_point": "0x0000000071727De22E5E9d8BAf0edAc6f37da032",
+  "paymaster": "0xc4688Ac776D11b63931B121E27b35A0d9F0F720d",
+  "wallet_factory": "0x2862bdccc8eea7f543845224c2c3dDc591F01FcD",
+  "registry": "0xe95f1508C92975e77b21a4077effcdb599eAE316",
   "update_interval_seconds": 300,
   "chain_id": 84532,
   "coingecko_url": "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd"
