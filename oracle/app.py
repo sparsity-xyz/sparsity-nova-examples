@@ -45,12 +45,8 @@ def get_enclave_address():
     return response.json()["address"]
 
 def get_wallet_address(operator_address):
-    """Get 4337 wallet address from factory."""
-    factory = w3.eth.contract(
-        address=to_checksum_address(config["wallet_factory"]),
-        abi=FACTORY_ABI
-    )
-    # Using agentId=0 for now - in production this would come from registration
+    """Get 4337 wallet address from factory. Uses agentId=0 (test mode)."""
+    factory = w3.eth.contract(address=to_checksum_address(config["wallet_factory"]), abi=FACTORY_ABI)
     return factory.functions.getWalletAddress(0, to_checksum_address(operator_address)).call()
 
 def fetch_btc_price():
@@ -112,30 +108,21 @@ def get_private_key():
     return response.json()["private_key"]
 
 def sign_hash(hash_hex):
-    """Sign a hash using local key from enclave (as Ethereum signed message)."""
+    """Sign hash as Ethereum signed message (wallet uses toEthSignedMessageHash)."""
     from eth_account import Account
     from eth_account.messages import encode_defunct
 
     private_key = get_private_key()
     hash_bytes = bytes.fromhex(hash_hex[2:] if hash_hex.startswith("0x") else hash_hex)
-
-    # Sign as Ethereum message (wallet uses toEthSignedMessageHash)
     message = encode_defunct(primitive=hash_bytes)
     signed = Account.sign_message(message, private_key)
-
-    # Return signature in format: r + s + v
     sig_hex = signed.signature.hex()
     return sig_hex if sig_hex.startswith("0x") else "0x" + sig_hex
 
 def send_user_op(user_op):
     """Send UserOperation to bundler."""
-    payload = {
-        "jsonrpc": "2.0",
-        "method": "eth_sendUserOperation",
-        "params": [user_op, config["entry_point"]],
-        "id": 1
-    }
-    logger.info(f"Sending UserOp: {json.dumps(user_op, indent=2)}")
+    payload = {"jsonrpc": "2.0", "method": "eth_sendUserOperation", "params": [user_op, config["entry_point"]], "id": 1}
+    logger.debug(f"Sending UserOp to {config['bundler_url']}")  # Use debug for verbose logging
     response = requests.post(config["bundler_url"], json=payload)
     if response.status_code != 200:
         raise Exception(f"Bundler HTTP {response.status_code}: {response.text}")
@@ -150,49 +137,31 @@ def update_price_on_chain():
         return {"error": "Contract address not configured"}
 
     price = fetch_btc_price()
-
-    # Get addresses
     operator = to_checksum_address(get_enclave_address())
     sender = to_checksum_address(get_wallet_address(operator))
+    needs_init = len(w3.eth.get_code(sender)) == 0
 
-    # Check if wallet needs to be created (no code at address)
-    wallet_code = w3.eth.get_code(sender)
-    needs_init = len(wallet_code) == 0
-
-    # Build call data for setPrice
-    contract = w3.eth.contract(
-        address=to_checksum_address(config["contract_address"]),
-        abi=CONTRACT_ABI
-    )
+    # Build execute(target, value, data) call
+    contract = w3.eth.contract(address=to_checksum_address(config["contract_address"]), abi=CONTRACT_ABI)
     call_data = contract.encodeABI(fn_name="setPrice", args=[price])
-
-    # Wrap in execute call for the wallet
     execute_data = "0xb61d27f6" + encode(
         ['address', 'uint256', 'bytes'],
         [to_checksum_address(config["contract_address"]), 0, bytes.fromhex(call_data[2:])]
     ).hex()
 
-    # Get nonce from entry point
+    # Get nonce
     entry_point = w3.eth.contract(
         address=to_checksum_address(config["entry_point"]),
         abi=[{"inputs": [{"name": "sender", "type": "address"}, {"name": "key", "type": "uint192"}], "name": "getNonce", "outputs": [{"name": "nonce", "type": "uint256"}], "stateMutability": "view", "type": "function"}]
     )
     nonce = entry_point.functions.getNonce(sender, 0).call()
 
-    # Get gas prices
+    # Gas pricing
     base_fee = w3.eth.get_block('latest')['baseFeePerGas']
     max_priority = w3.to_wei(1, 'gwei')
     max_fee = base_fee * 2 + max_priority
+    verification_gas, call_gas = (800000, 300000) if needs_init else (50000, 80000)
 
-    # Set gas limits based on whether wallet exists
-    if needs_init:
-        verification_gas = 800000
-        call_gas = 300000
-    else:
-        verification_gas = 50000
-        call_gas = 80000
-
-    # Build UserOperation
     user_op = {
         "sender": sender,
         "nonce": hex(nonce),
@@ -209,31 +178,15 @@ def update_price_on_chain():
         "signature": "0x"
     }
 
-    # Add factory/factoryData if wallet needs to be created
     if needs_init:
-        # createAccount(uint256 agentId, address operator)
-        factory_data = "0x114c63b1" + encode(
-            ['uint256', 'address'],
-            [0, operator]  # agentId=0 for testing
-        ).hex()
+        # createAccount(uint256 agentId, address operator) - agentId=0 for testing
         user_op["factory"] = config["wallet_factory"]
-        user_op["factoryData"] = factory_data
+        user_op["factoryData"] = "0x114c63b1" + encode(['uint256', 'address'], [0, operator]).hex()
 
-    # Sign UserOp
-    op_hash = get_user_op_hash(user_op)
-    signature = sign_hash(op_hash)
-    user_op["signature"] = signature
-
-    # Send to bundler
+    user_op["signature"] = sign_hash(get_user_op_hash(user_op))
     op_hash_result = send_user_op(user_op)
 
-    return {
-        "success": True,
-        "price_cents": price,
-        "price_usd": price / 100,
-        "user_op_hash": op_hash_result,
-        "wallet": sender
-    }
+    return {"success": True, "price_cents": price, "user_op_hash": op_hash_result, "wallet": sender}
 
 def scheduled_update():
     while True:
@@ -252,22 +205,17 @@ def index():
         wallet = get_wallet_address(operator)
         return jsonify({
             "status": "ok",
-            "message": "BTC Price Oracle (4337)",
-            "operator_address": operator,
-            "wallet_address": wallet,
-            "contract_address": config.get("contract_address", "not configured"),
-            "paymaster": config.get("paymaster"),
-            "endpoints": {
-                "/price": "Get current BTC price from CoinGecko",
-                "/update": "Trigger price update via UserOp",
-                "/contract-price": "Read current price from contract"
-            }
+            "operator": operator,
+            "wallet": wallet,
+            "contract": config.get("contract_address"),
+            "paymaster": config.get("paymaster")
         })
     except Exception as e:
         return jsonify({"status": "error", "error": str(e)}), 500
 
 @app.route('/price')
 def price():
+    """TEST ONLY: Direct CoinGecko fetch, bypasses contract. Use /contract-price in production."""
     try:
         price_cents = fetch_btc_price()
         return jsonify({"source": "coingecko", "price_cents": price_cents, "price_usd": price_cents / 100})
@@ -276,6 +224,7 @@ def price():
 
 @app.route('/update')
 def update():
+    """TEST ONLY: Manual trigger for price update. Remove in production."""
     try:
         result = update_price_on_chain()
         return jsonify(result)
