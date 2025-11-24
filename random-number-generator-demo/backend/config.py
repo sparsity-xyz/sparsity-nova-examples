@@ -1,14 +1,14 @@
 import json
-import os
 from pathlib import Path
-from eth_account import Account
 
 
 class Config:
     RPC_URL = "https://base-sepolia-public.nodies.app"
     CONTRACT_ADDRESS = "0xb82560bcbC46666D74FfC5f5685BE92C03835746"
 
-    POLL_INTERVAL = 10  # 秒
+    ENLAVER_ENDPOINT= "http://localhost:9000"
+
+    POLL_INTERVAL = 10  # second
     FROM_BLOCK = "latest"
 
     DEPOSIT_AMOUNT = 0.1 # ether

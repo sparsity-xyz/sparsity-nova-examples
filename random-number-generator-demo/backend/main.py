@@ -37,7 +37,7 @@ class RandomNumberGenerator:
             abi=Config.CONTRACT_ABI,
         )
 
-        self.enclaver = Enclave()
+        self.enclaver = Enclave(Config.ENLAVER_ENDPOINT)
 
         # Operator account
         self.operator_address = Web3.to_checksum_address(self.enclaver.eth_address())
