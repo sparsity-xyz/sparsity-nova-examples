@@ -46,6 +46,7 @@ npm run check:local
 ```
 cp .env.example .env
 # fill the missing part in .env
+# REGISTRY_CONTRACT and DEPLOYMENT_PRIVATE_KEY
 ```
 ## deploy on base sepolia
 ```
@@ -61,3 +62,5 @@ npx hardhat verify --network baseSepolia <YOUR_CONTRACT_ADDRESS>
 ```
 OPERATOR_ADDRESS=<operator_address> npx hardhat run scripts/register-operator.js --network baseSepolia
 ```
+
+## call registry contract to register TEE operator

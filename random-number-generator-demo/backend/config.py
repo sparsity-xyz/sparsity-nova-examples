@@ -3,8 +3,8 @@ from pathlib import Path
 
 
 class Config:
-    RPC_URL = "https://base-sepolia-public.nodies.app"
-    CONTRACT_ADDRESS = "0xb82560bcbC46666D74FfC5f5685BE92C03835746"
+    RPC_URL = "http://127.0.0.1:8545"
+    CONTRACT_ADDRESS = "0x5FbDB2315678afecb367f032d93F642f64180aa3"
 
     ENLAVER_ENDPOINT= "http://127.0.0.1:18000"
 

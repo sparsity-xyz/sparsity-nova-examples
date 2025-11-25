@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity ^0.8.30;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "./INovaAPP.sol";
 
 /// @title RNG Callback Interface
 /// @notice User contracts need to implement this interface to receive random number callbacks
@@ -19,9 +20,11 @@ interface IRNGCallback {
 /// @author chuwt
 /// @notice Off-chain true random number generator (with callback support)
 /// @dev User request → Emit event → Off-chain generation → Callback on-chain → Callback user contract
-contract RandomNumberGenerator is Ownable {
+contract RandomNumberGenerator is Ownable, INovaAPP {
 
     // ========== State Variables ==========
+    // Nova registry
+    address public novaRegistryAddress;
 
     // Authorized operators (off-chain service)
     mapping(address => bool) public operators;
@@ -90,6 +93,7 @@ contract RandomNumberGenerator is Ownable {
 
     /// @notice Operator update event
     event OperatorUpdated(address indexed operator, bool status);
+    event SetNovaRegistry(address indexed novaRegistry);
 
     /// @notice Callback gas limit update event
     event CallbackGasLimitUpdated(uint256 oldLimit, uint256 newLimit);
@@ -101,10 +105,16 @@ contract RandomNumberGenerator is Ownable {
         _;
     }
 
+    modifier onlyRegistry() {
+        require(msg.sender == novaRegistryAddress, "Not registry contract");
+        _;
+    }
+
     // ========== Constructor ==========
 
-    constructor() Ownable(msg.sender) {
+    constructor(address registryAddress) Ownable(msg.sender) {
         requestCounter = 0;
+        novaRegistryAddress = registryAddress;
     }
 
     // ========== User Functions (without callback) ==========
@@ -377,5 +387,15 @@ contract RandomNumberGenerator is Ownable {
     /// @notice Check if address is operator
     function isOperator(address addr) external view returns (bool) {
         return operators[addr];
+    }
+
+    function setNovaRegistry(address registryAddress) public onlyOwner {
+        novaRegistryAddress = registryAddress;
+        emit SetNovaRegistry(novaRegistryAddress);
+    }
+
+    function registerTEEWallet(address teeWalletAddress) public onlyRegistry {
+        operators[teeWalletAddress] = true;
+        emit OperatorUpdated(teeWalletAddress, true);
     }
 }

@@ -29,10 +29,12 @@ async function main() {
     process.exit(1);
   }
 
+  const registry_contract = process.env.REGISTRY_CONTRACT || "0x0000000000000000000000000000000000000000"
+
   // Deploy contract
   console.log("\n📦 Deploying RandomNumberGenerator...");
   const RandomNumberGenerator = await hre.ethers.getContractFactory("RandomNumberGenerator");
-  const rng = await RandomNumberGenerator.deploy();
+  const rng = await RandomNumberGenerator.deploy(registry_contract);
 
   await rng.waitForDeployment();
   const rngAddress = await rng.getAddress();
