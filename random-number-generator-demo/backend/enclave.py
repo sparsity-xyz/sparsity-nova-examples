@@ -36,7 +36,7 @@ class Enclave:
             "payload": self.tx_to_payload(transaction_dict),
             "include_attestation": False
         })
-        return res.json()
+        return res.json()["raw_transaction"]
 
     @staticmethod
     def tx_to_payload(tx):

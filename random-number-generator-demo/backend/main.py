@@ -10,6 +10,7 @@ from fastapi.requests import Request
 
 from config import Config
 from enclave import Enclave
+from local_enclave import LocalEnclave
 
 
 logging.basicConfig(
@@ -36,7 +37,10 @@ class RandomNumberGenerator:
             abi=Config.CONTRACT_ABI,
         )
 
-        self.enclaver = Enclave(Config.ENLAVER_ENDPOINT)
+        if Config.IN_DOCKER:
+            self.enclaver = Enclave(Config.ENLAVER_ENDPOINT)
+        else:
+            self.enclaver = LocalEnclave(self.w3)
 
         # Operator account
         self.operator_address = Web3.to_checksum_address(self.enclaver.eth_address())
@@ -51,8 +55,10 @@ class RandomNumberGenerator:
 
         # Verify operator permission
         self.is_operator = self.contract.functions.isOperator(self.operator_address).call()
-        if not self.is_operator:
-            logging.info("✅ Operator authorized")
+        if self.is_operator:
+            logging.info("✅ Operator is authorized")
+        else:
+            logging.info("❌ Operator is not authorized")
 
         # Processed requests (prevent duplicates)
         self.processed_requests = set()
@@ -168,7 +174,7 @@ class RandomNumberGenerator:
             signed_txn = self.enclaver.sign_tx(transaction)
 
             # Send transaction
-            tx_hash = self.w3.eth.send_raw_transaction(signed_txn["raw_transaction"])
+            tx_hash = self.w3.eth.send_raw_transaction(signed_txn)
             tx_hash_hex = tx_hash.hex()
 
             logging.info(f"📤 Fulfilling request {request_id}, tx: {tx_hash_hex}")
@@ -266,19 +272,23 @@ class RandomNumberGenerator:
             from_block=Config.FROM_BLOCK
         )
 
+        while True:
+            if not self.is_operator:
+                self.is_operator = self.contract.functions.isOperator(self.operator_address).call()
+                logging.info("Wait for register operator...")
+                await asyncio.sleep(poll_interval)
+            else:
+                break
+
         logging.info("✅ Event filter created, listening for events...\n")
 
         while True:
             try:
-                if not self.is_operator:
-                    self.is_operator = self.contract.functions.isOperator(self.operator_address).call()
-                    logging.info("Wait for register operator...")
-                else:
-                    # Get new events
-                    events = event_filter.get_new_entries()
+                # Get new events
+                events = event_filter.get_new_entries()
 
-                    for event in events:
-                        await self.handle_random_requested_event(event)
+                for event in events:
+                    await self.handle_random_requested_event(event)
 
                 # Wait before checking again
                 await asyncio.sleep(poll_interval)

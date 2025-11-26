@@ -1,17 +1,17 @@
 import json
+import os
 from pathlib import Path
 
 
 class Config:
-    RPC_URL = "http://127.0.0.1:8545"
-    CONTRACT_ADDRESS = "0x5FbDB2315678afecb367f032d93F642f64180aa3"
+    RPC_URL = "https://base-sepolia-public.nodies.app"
+    CONTRACT_ADDRESS = "0x7eAA444e7257Aa4A5Ed74793991AAa0767939075"
 
     ENLAVER_ENDPOINT= "http://127.0.0.1:18000"
+    IN_DOCKER = os.getenv("IN_DOCKER", "False").lower() == "true"
 
     POLL_INTERVAL = 10  # second
     FROM_BLOCK = "latest"
-
-    DEPOSIT_AMOUNT = 0.1 # ether
 
     @staticmethod
     def load_abi():

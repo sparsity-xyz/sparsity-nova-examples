@@ -90,11 +90,9 @@ async function main() {
   }
 
   console.log("\n📌 Next Steps:");
-  console.log("1. Register operator:");
-  console.log(`   OPERATOR_ADDRESS=<operator_address> npx hardhat run scripts/register-operator.js --network ${hre.network.name}`);
-  console.log("\n2. Start off-chain service:");
+  console.log("\n1. Start off-chain service:");
   console.log("   cd backend && python main.py");
-  console.log("\n3. Test the RNG:");
+  console.log("\n2. Test the RNG:");
   console.log(`   npx hardhat run scripts/test-rng.js --network ${hre.network.name}`);
   console.log("=".repeat(70));
 }
