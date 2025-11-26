@@ -9,4 +9,4 @@ COPY . .
 
 ENV IN_DOCKER=True
 
-CMD ["python", "main.py"]
+CMD ["python", "/app/main.py"]
