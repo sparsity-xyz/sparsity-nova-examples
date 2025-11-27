@@ -1,6 +1,6 @@
 
 # rng demo
-This is a demo show how a random number generator running in Sparsity Nova Platform
+This is a demo showing how a random number generator runs on the Sparsity Nova Platform.
 
 ## local testing
 
