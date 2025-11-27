@@ -57,7 +57,7 @@ npm run check:local
 ```
 cd contract
 ```
-fulfill env
+set up environment variables
 ```
 cp .env.example .env
 ```
