@@ -89,11 +89,6 @@ async function main() {
     console.log("🔍 Explorer:", deploymentInfo.explorerUrl);
   }
 
-  console.log("\n📌 Next Steps:");
-  console.log("\n1. Start off-chain service:");
-  console.log("   cd backend && python main.py");
-  console.log("\n2. Test the RNG:");
-  console.log(`   npx hardhat run scripts/test-rng.js --network ${hre.network.name}`);
   console.log("=".repeat(70));
 }
 

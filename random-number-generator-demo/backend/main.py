@@ -10,7 +10,6 @@ from fastapi.requests import Request
 
 from config import Config
 from enclave import Enclave
-from local_enclave import LocalEnclave
 
 
 logging.basicConfig(
@@ -37,10 +36,7 @@ class RandomNumberGenerator:
             abi=Config.CONTRACT_ABI,
         )
 
-        if Config.IN_DOCKER:
-            self.enclaver = Enclave(Config.ENLAVER_ENDPOINT)
-        else:
-            self.enclaver = LocalEnclave(self.w3)
+        self.enclaver = Enclave(Config.ENCLAVER_ENDPOINT)
 
         # Operator account
         self.operator_address = Web3.to_checksum_address(self.enclaver.eth_address())

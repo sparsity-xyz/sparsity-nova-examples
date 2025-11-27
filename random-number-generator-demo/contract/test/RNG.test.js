@@ -201,15 +201,6 @@ async function main() {
   fs.writeFileSync(callbackInfoPath, JSON.stringify(callbackInfo, null, 2));
   console.log("\n💾 Callback test info saved to callback-test-info.json");
 
-  console.log("\n" + "=".repeat(70));
-  console.log("💡 Next Steps");
-  console.log("=".repeat(70));
-  console.log("\n1. Start the off-chain service to fulfill these requests:");
-  console.log("   cd backend && python main.py");
-  console.log("\n2. Wait a few seconds, then check results:");
-  console.log("   npx hardhat run scripts/check-results.js --network", hre.network.name);
-  console.log("\n3. Check callback contract results:");
-  console.log("   npx hardhat run scripts/check-callback.js --network", hre.network.name);
   console.log("=".repeat(70));
 }
 
