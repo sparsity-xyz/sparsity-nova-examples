@@ -149,8 +149,8 @@ async function main() {
     console.log("   Address:", funder.address);
     console.log("   Balance:", hre.ethers.formatEther(funderBalance), "ETH");
 
-    // Transfer 0.1 ETH to operator
-    const fundAmount = hre.ethers.parseEther("0.1");
+    // Transfer 1 ETH to operator
+    const fundAmount = hre.ethers.parseEther("1");
 
     if (funderBalance < fundAmount) {
       throw new Error(
