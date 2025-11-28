@@ -110,7 +110,7 @@ deploy-contract: build-contract
 deploy-contract-local: build-contract
 	@echo "Deploying to local anvil node..."
 	cd contracts && forge script script/Deploy.s.sol:DeployScript \
-		--rpc-url http://127.0.0.1:8545
+		--rpc-url http://127.0.0.1:8545 --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 --broadcast
 	@echo "Updating config.json..."
 	@CONTRACT_ADDRESS=$$(python3 -c 'import json; print([t["contractAddress"] for t in json.load(open("contracts/broadcast/Deploy.s.sol/31337/run-latest.json"))["transactions"] if t["contractName"] == "BTCPriceOracle"][0])') && \
 	echo "Found contract address: $$CONTRACT_ADDRESS" && \
