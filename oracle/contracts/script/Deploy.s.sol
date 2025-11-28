@@ -9,7 +9,8 @@ contract DeployScript is Script {
         vm.startBroadcast();
 
         // Deploy with deployer as initial oracle (will update later)
-        BTCPriceOracle oracle = new BTCPriceOracle(msg.sender);
+        address registryAddress = vm.envOr("REGISTRY_CONTRACT", msg.sender);
+        BTCPriceOracle oracle = new BTCPriceOracle(registryAddress, msg.sender);
 
         console.log("BTCPriceOracle deployed to:", address(oracle));
         console.log("Initial oracle (deployer):", msg.sender);

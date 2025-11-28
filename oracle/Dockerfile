@@ -11,5 +11,7 @@ COPY app.py .
 COPY config.json .
 RUN chmod +x app.py
 
+ENV IN_DOCKER=True
+
 # Run the oracle application
 CMD ["python", "/app/app.py"]

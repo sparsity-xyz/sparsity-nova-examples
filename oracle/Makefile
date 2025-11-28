@@ -23,11 +23,13 @@ help:
 	@echo "BTC Price Oracle - Makefile Commands"
 	@echo ""
 	@echo "  make deploy-contract       - Deploy contract (step 1)"
+	@echo "  make deploy-contract-local - Deploy contract to local anvil node"
 	@echo "  make set-contract-address  - Update config.json with contract address"
 	@echo "  make deploy-enclave        - Deploy enclave to EC2"
 	@echo "  make get-address           - Get enclave wallet address"
 	@echo "  make fund-enclave          - Fund enclave wallet with 0.01 ETH"
 	@echo "  make set-oracle            - Update contract's oracle to enclave address"
+	@echo "  make register-tee-wallet   - Register TEE wallet and fund it"
 	@echo ""
 	@echo "Setup: cp .env.example .env && fill in PRIVATE_KEY and ETHERSCAN_API_KEY"
 	@echo ""
@@ -96,9 +98,23 @@ deploy-contract: build-contract
 		--broadcast \
 		--verify \
 		--etherscan-api-key $(ETHERSCAN_API_KEY) \
-		--verifier-url https://api.etherscan.io/v2/api \
-		--chain 84532 \
+		--verifier-url https://api.etherscan.io/v2/api?chainid=84532 \
 		-vvv
+	@echo "Updating config.json..."
+	@CONTRACT_ADDRESS=$$(python3 -c 'import json; print([t["contractAddress"] for t in json.load(open("contracts/broadcast/Deploy.s.sol/84532/run-latest.json"))["transactions"] if t["contractName"] == "BTCPriceOracle"][0])') && \
+	echo "Found contract address: $$CONTRACT_ADDRESS" && \
+	python3 -c 'import json; data = json.load(open("config.json")); data["contract_address"] = "'$$CONTRACT_ADDRESS'"; data["rpc_url"] = "$(RPC_URL)"; data["chain_id"] = 84532; json.dump(data, open("config.json", "w"), indent=2); print("config.json updated!")'
+
+
+# Deploy to local anvil node
+deploy-contract-local: build-contract
+	@echo "Deploying to local anvil node..."
+	cd contracts && forge script script/Deploy.s.sol:DeployScript \
+		--rpc-url http://127.0.0.1:8545
+	@echo "Updating config.json..."
+	@CONTRACT_ADDRESS=$$(python3 -c 'import json; print([t["contractAddress"] for t in json.load(open("contracts/broadcast/Deploy.s.sol/31337/run-latest.json"))["transactions"] if t["contractName"] == "BTCPriceOracle"][0])') && \
+	echo "Found contract address: $$CONTRACT_ADDRESS" && \
+	python3 -c 'import json; data = json.load(open("config.json")); data["contract_address"] = "'$$CONTRACT_ADDRESS'"; data["rpc_url"] = "http://127.0.0.1:8545"; data["chain_id"] = 31337; json.dump(data, open("config.json", "w"), indent=2); print("config.json updated!")'
 
 # Set oracle address on contract (after enclave is deployed)
 # Usage: make set-oracle ORACLE=0x...
@@ -112,6 +128,24 @@ endif
 	cast send --rpc-url $(RPC_URL) --private-key $(PRIVATE_KEY) \
 		$$CONTRACT "setOracle(address)" $(ORACLE)
 	@echo "Oracle address updated!"
+
+# Register TEE wallet and fund it
+# Usage: make register-tee-wallet TEE_WALLET=0x...
+register-tee-wallet:
+ifndef TEE_WALLET
+	$(error TEE_WALLET is required. Usage: make register-tee-wallet TEE_WALLET=0x...)
+endif
+	@echo "Registering TEE wallet: $(TEE_WALLET)"
+	@CONTRACT=$$(python3 -c 'import json; print(json.load(open("config.json"))["contract_address"])') && \
+	REGISTRY=$$(python3 -c 'import json; print(json.load(open("config.json"))["contract_address"])') && \
+	RPC=$$(python3 -c 'import json; print(json.load(open("config.json"))["rpc_url"])') && \
+	echo "Calling registerTEEWallet on contract $$CONTRACT..." && \
+	cast send --rpc-url $$RPC --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
+		$$CONTRACT "registerTEEWallet(address)" $(TEE_WALLET)
+	@echo "Funding TEE wallet with 0.01 ETH..."
+	@RPC=$$(python3 -c 'import json; print(json.load(open("config.json"))["rpc_url"])') && \
+	cast send --rpc-url $$RPC --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 $(TEE_WALLET) --value 0.01ether
+	@echo "TEE wallet registered and funded!"
 
 # Verify contract on Basescan
 verify-contract:
