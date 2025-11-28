@@ -14,6 +14,6 @@ egress:
     - "api.coingecko.com"
     - "sepolia.base.org"
 api:
-  listen_port: 9000
+  listen_port: 18000
 aux_api:
-  listen_port: 9001
+  listen_port: 18001

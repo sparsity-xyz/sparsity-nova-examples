@@ -4,6 +4,7 @@ BTC Price Oracle - Fetches BTC price from CoinGecko and updates on-chain.
 """
 
 import json
+import os
 import time
 import threading
 import logging
@@ -23,7 +24,7 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 
 # Enclaver odyn API endpoint (internal)
-ODYN_API = "http://127.0.0.1:9000"
+ODYN_API = "http://localhost:18000" if os.getenv("IN_DOCKER", "False").lower() == "true" else "http://54.215.216.173:18000"
 
 # Global config
 config = {}
@@ -64,7 +65,7 @@ CONTRACT_ABI = [
 def load_config():
     """Load configuration from config.json."""
     global config, w3
-    with open("/app/config.json", "r") as f:
+    with open("./config.json", "r") as f:
         config = json.load(f)
     w3 = Web3(Web3.HTTPProvider(config["rpc_url"]))
 
@@ -160,7 +161,7 @@ def update_price_on_chain():
         address=to_checksum_address(config["contract_address"]),
         abi=CONTRACT_ABI
     )
-    tx_data = contract.encodeABI(fn_name="setPrice", args=[price])
+    tx_data = contract.functions.setPrice(price)._encode_transaction_data()
 
     # Sign and send
     tx_hash = sign_and_send_tx(
@@ -196,6 +197,7 @@ def index():
             "status": "ok",
             "message": "BTC Price Oracle",
             "enclave_address": address,
+            "balance": f"{Web3.from_wei(w3.eth.get_balance(Web3.to_checksum_address(address)), 'ether')} ETH",
             "contract_address": config.get("contract_address", "not configured"),
             "endpoints": {
                 "/price": "Get current BTC price from CoinGecko",
