@@ -2,6 +2,22 @@
 # rng demo
 This is a demo showing how a random number generator runs on the Sparsity Nova Platform.
 
+## architecture
+![](./architecture.png)
+
+### RNG contract
+A smart contract that provides off-chain assisted true random numbers.
+Users submit random number requests, off-chain operators listen to events, generate randomness, and call back the contract, optionally triggering user-defined callback contracts.
+### Nova platform
+The on-chain registry and management layer of the Nova system.
+It registers TEE wallets, authorizes operators, and coordinates trusted computation flows across the Nova ecosystem.
+#### Backend
+The off-chain service responsible for listening to on-chain events, generating random numbers securely, and fulfilling them by calling the RNG contract.
+#### Enclaver
+It can act as an operator that generates randomness inside the enclave and submits verified results to the blockchain.
+#### UserContract
+A smart contract implemented by the user, which receives random numbers through the callback interface IRNGCallback.
+This allows developers to build lotteries, games, on-chain logic, or autonomous agents that depend on secure randomness.
 ## local testing
 
 ### deploy contract
