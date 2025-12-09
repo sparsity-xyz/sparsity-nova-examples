@@ -1,0 +1,7 @@
+# Core dependencies
+flask==3.1.2
+requests==2.31.0
+pydantic==2.11.3
+
+# HTML parsing
+beautifulsoup4>=4.12.2

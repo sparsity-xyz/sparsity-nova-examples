@@ -1,0 +1,255 @@
+#!/usr/bin/env python3
+"""
+Coin Price Bot - A TEE-based service for fetching and analyzing cryptocurrency prices.
+
+This service runs inside an AWS Nitro Enclave using the enclaver tool.
+It fetches price information from multiple sources and provides AI-powered analysis.
+"""
+
+import json
+import os
+import time
+import logging
+from typing import Dict, Any, List
+
+from flask import Flask, jsonify, request
+
+from enclave import Enclave
+from utils import url_prompt, extract_urls, fetch_html, summary_prompt, final_summary_prompt
+from tee_client import TEEClient
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+app = Flask(__name__)
+
+# Enclaver odyn API endpoint (internal)
+ODYN_API = "http://localhost:18000" if os.getenv("IN_DOCKER", "False").lower() == "true" else os.getenv("MOCK_ODYN_API", "http://54.215.216.173:18000")
+
+# Chat-bot TEE endpoint for AI queries
+CHAT_BOT_ENDPOINT = os.getenv("CHAT_BOT_ENDPOINT", "https://vmi.sparsity.ai/chat_bot")
+
+# Initialize enclave helper
+enclave = Enclave(ODYN_API)
+
+# Initialize TEE client for chat-bot
+tee_client = None
+
+
+def get_tee_client():
+    """Lazy initialization of TEE client."""
+    global tee_client
+    if tee_client is None:
+        tee_client = TEEClient(CHAT_BOT_ENDPOINT)
+    return tee_client
+
+
+@app.route('/')
+def index():
+    """Health check endpoint with service information."""
+    try:
+        address = enclave.eth_address()
+        return jsonify({
+            "status": "ok",
+            "service": "Coin Price Bot",
+            "version": "1.0.0",
+            "enclave_address": address,
+            "chat_bot_endpoint": CHAT_BOT_ENDPOINT,
+            "endpoints": {
+                "/": "Health check and service info",
+                "/ping": "Simple ping/pong",
+                "/attestation": "Get attestation document",
+                "/talk": "POST - Query coin prices (requires JSON body)"
+            }
+        })
+    except Exception as e:
+        logger.error(f"Health check error: {e}")
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+
+@app.route('/ping')
+def ping():
+    """Simple ping endpoint."""
+    return jsonify({"pong": int(time.time())})
+
+
+@app.route('/attestation')
+def attestation():
+    """Get attestation document from the enclave."""
+    try:
+        att_doc = enclave.get_attestation()
+        if att_doc.get("mock"):
+            return jsonify({
+                "attestation_doc": att_doc,
+                "mock": True
+            })
+        return jsonify({
+            "attestation_doc": att_doc
+        })
+    except Exception as e:
+        logger.error(f"Attestation error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/talk', methods=['POST'])
+def talk():
+    """
+    Main endpoint for coin price queries.
+    
+    This endpoint:
+    1. Takes a user query about coin prices
+    2. Uses chat-bot TEE to find relevant URLs
+    3. Fetches and summarizes content from each URL
+    4. Returns a final AI-generated summary with price information
+    
+    Expected JSON body:
+    {
+        "api_key": "your-openai-api-key",
+        "message": "What is the current price of Bitcoin?",
+        "platform": "openai",
+        "ai_model": "gpt-4"
+    }
+    
+    Returns:
+    {
+        "sig": "hex-signature",
+        "data": [
+            {
+                "description": "urls to resolve query",
+                "data": {...},
+                "sig": "..."
+            },
+            ...
+            {
+                "description": "final summary combining all url content summaries",
+                "data": {...},
+                "sig": "..."
+            }
+        ]
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({"error": "Request body is required"}), 400
+        
+        api_key = data.get("api_key", "")
+        message = data.get("message", "")
+        platform = data.get("platform", "openai")
+        ai_model = data.get("ai_model", "gpt-4")
+        
+        # Validate required fields
+        if not api_key:
+            return jsonify({"error": "api_key is required"}), 400
+        if not message:
+            return jsonify({"error": "message is required"}), 400
+        
+        client = get_tee_client()
+        original_message = message
+        req_resp_pairs = []
+        
+        # Step 1: Ask AI to find relevant URLs
+        logger.info(f"Step 1: Getting URLs for query: {message[:50]}...")
+        url_list_prompt = url_prompt(message)
+        
+        url_response = client.talk(api_key, url_list_prompt, platform, ai_model)
+        if "error" in url_response:
+            return jsonify({"error": f"Failed to get URLs: {url_response['error']}"}), 500
+        
+        req_resp_pairs.append({
+            "description": "urls to resolve query",
+            "attestation_endpoint": f"{CHAT_BOT_ENDPOINT}/attestation",
+            **url_response
+        })
+        
+        # Extract URLs from response
+        url_text = url_response.get("data", {}).get("response", "")
+        urls = extract_urls(url_text)
+        logger.info(f"Extracted URLs: {urls}")
+        
+        # Step 2: Fetch HTML content for each URL (max 3)
+        url_html_dict = {}
+        for url in urls[:3]:
+            logger.info(f"Fetching HTML for: {url}")
+            html = fetch_html(url)
+            url_html_dict[url] = html
+        
+        # Step 3: Summarize each URL's content
+        url_summary_dict = {}
+        for url, html in url_html_dict.items():
+            logger.info(f"Summarizing content for: {url}")
+            sp = summary_prompt(original_message, url, html)
+            
+            summary_response = client.talk(api_key, sp, platform, ai_model)
+            if "error" not in summary_response:
+                url_summary_dict[url] = summary_response.get("data", {}).get("response", "")
+                req_resp_pairs.append({
+                    "description": "summaries for the url content",
+                    "attestation_endpoint": f"{CHAT_BOT_ENDPOINT}/attestation",
+                    **summary_response
+                })
+            else:
+                logger.warning(f"Failed to summarize {url}: {summary_response.get('error')}")
+        
+        # Step 4: Create final summary
+        logger.info("Creating final summary...")
+        formatted_summaries = ""
+        for i, (url, summary) in enumerate(url_summary_dict.items(), 1):
+            formatted_summaries += f"url{i}:\n{url}\nSummary: {summary}\n\n"
+        
+        final_prompt = final_summary_prompt(original_message, formatted_summaries)
+        final_response = client.talk(api_key, final_prompt, platform, ai_model)
+        
+        if "error" in final_response:
+            return jsonify({"error": f"Failed to create final summary: {final_response['error']}"}), 500
+        
+        req_resp_pairs.append({
+            "description": "final summary combining all url content summaries",
+            "attestation_endpoint": f"{CHAT_BOT_ENDPOINT}/attestation",
+            **final_response
+        })
+        
+        # Sign the complete response
+        signature = enclave.sign_message(req_resp_pairs)
+        
+        return jsonify({
+            "sig": signature,
+            "data": req_resp_pairs
+        })
+        
+    except Exception as e:
+        logger.error(f"Talk error: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/query')
+def test_query():
+    """Test endpoint to verify external network access."""
+    try:
+        import requests
+        data = requests.get("https://api.binance.com/api/v3/time", timeout=10).json()
+        signature = enclave.sign_message(data)
+        return jsonify({
+            "sig": signature,
+            "data": data
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+if __name__ == "__main__":
+    logger.info("Starting Coin Price Bot service...")
+    logger.info(f"ODYN API endpoint: {ODYN_API}")
+    logger.info(f"Chat-bot TEE endpoint: {CHAT_BOT_ENDPOINT}")
+    logger.info("Endpoints:")
+    logger.info("  GET  /             - Health check")
+    logger.info("  GET  /ping         - Ping/pong")
+    logger.info("  GET  /attestation  - Get attestation document")
+    logger.info("  POST /talk         - Query coin prices")
+    
+    app.run(host='0.0.0.0', port=8000)
