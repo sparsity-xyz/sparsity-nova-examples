@@ -95,13 +95,14 @@ def talk():
     """
     Main endpoint for coin price queries.
     
-    This endpoint:
-    1. Takes a user query about coin prices
-    2. Uses chat-bot TEE to find relevant URLs
-    3. Fetches and summarizes content from each URL
-    4. Returns a final AI-generated summary with price information
+    Accepts encrypted requests in the format:
+    {
+        "nonce": "hex-encoded-32-bytes",
+        "public_key": "hex-encoded-DER-public-key",
+        "data": "hex-encoded-encrypted-json"
+    }
     
-    Expected JSON body:
+    The encrypted data should contain:
     {
         "api_key": "your-openai-api-key",
         "message": "What is the current price of Bitcoin?",
@@ -109,30 +110,42 @@ def talk():
         "ai_model": "gpt-4"
     }
     
-    Returns:
-    {
-        "sig": "hex-signature",
-        "data": [
-            {
-                "description": "urls to resolve query",
-                "data": {...},
-                "sig": "..."
-            },
-            ...
-            {
-                "description": "final summary combining all url content summaries",
-                "data": {...},
-                "sig": "..."
-            }
-        ]
-    }
+    Returns encrypted response with signature.
     """
     try:
-        data = request.get_json()
+        request_data = request.get_json()
         
-        if not data:
+        if not request_data:
             return jsonify({"error": "Request body is required"}), 400
         
+        # Check if this is an encrypted request
+        if "nonce" in request_data and "public_key" in request_data and "data" in request_data:
+            # Encrypted request format
+            nonce_hex = request_data.get("nonce", "")
+            client_public_key_hex = request_data.get("public_key", "")
+            encrypted_data_hex = request_data.get("data", "")
+            
+            if not nonce_hex or not client_public_key_hex or not encrypted_data_hex:
+                return jsonify({"error": "nonce, public_key, and data are required for encrypted requests"}), 400
+            
+            # Decrypt the request
+            logger.info("Decrypting incoming request...")
+            try:
+                data = enclave.decrypt_request(
+                    nonce_hex, client_public_key_hex, encrypted_data_hex
+                )
+            except Exception as e:
+                logger.error(f"Decryption failed: {e}")
+                return jsonify({"error": f"Decryption failed: {str(e)}"}), 400
+            
+            client_public_key_der = bytes.fromhex(client_public_key_hex)
+            is_encrypted = True
+        else:
+            # Legacy plaintext format
+            data = request_data
+            is_encrypted = False
+        
+        # Extract fields from decrypted data
         api_key = data.get("api_key", "")
         message = data.get("message", "")
         platform = data.get("platform", "openai")
@@ -209,13 +222,32 @@ def talk():
             **final_response
         })
         
-        # Sign the complete response
-        signature = enclave.sign_message(req_resp_pairs)
-        
-        return jsonify({
-            "sig": signature,
-            "data": req_resp_pairs
-        })
+        if is_encrypted:
+            # Encrypt the response
+            logger.info("Encrypting response...")
+            encrypted_response, server_public_key_hex, response_nonce_hex = enclave.encrypt_response(
+                req_resp_pairs, client_public_key_der
+            )
+            
+            encrypted_envelope = {
+                "nonce": response_nonce_hex,
+                "public_key": server_public_key_hex,
+                "encrypted_data": encrypted_response
+            }
+            
+            signature = enclave.sign_message(encrypted_envelope)
+            
+            return jsonify({
+                "sig": signature,
+                "data": encrypted_envelope
+            })
+        else:
+            # Legacy plaintext response
+            signature = enclave.sign_message(req_resp_pairs)
+            return jsonify({
+                "sig": signature,
+                "data": req_resp_pairs
+            })
         
     except Exception as e:
         logger.error(f"Talk error: {e}", exc_info=True)
