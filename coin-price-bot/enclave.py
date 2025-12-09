@@ -34,7 +34,7 @@ class Enclave:
         res.raise_for_status()
         return res.json()["address"]
     
-    def get_attestation(self) -> Dict[str, Any]:
+    def get_attestation(self) -> str:
         """
         Get the attestation document from the enclave.
         
@@ -42,28 +42,20 @@ class Enclave:
         We base64-encode it for JSON transport.
         
         Returns:
-            The attestation document as a dictionary with base64-encoded CBOR.
+            Base64-encoded CBOR attestation document string.
         """
         import base64
         
-        try:
-            res = requests.post(
-                f"{self.endpoint}/v1/attestation",
-                json={"nonce": ""},
-                timeout=10
-            )
-            res.raise_for_status()
-            
-            # Response is CBOR binary, base64 encode it for JSON transport
-            attestation_cbor = res.content
-            attestation_b64 = base64.b64encode(attestation_cbor).decode('utf-8')
-            
-            return {
-                "attestation_doc": attestation_b64,
-                "format": "cbor_base64"
-            }
-        except requests.exceptions.RequestException as e:
-            return {"error": f"Request failed: {str(e)}"}
+        res = requests.post(
+            f"{self.endpoint}/v1/attestation",
+            json={"nonce": ""},
+            timeout=10
+        )
+        res.raise_for_status()
+        
+        # Response is CBOR binary, base64 encode it for JSON transport
+        attestation_cbor = res.content
+        return base64.b64encode(attestation_cbor).decode('utf-8')
     
     def get_random_bytes(self, count: int = 32) -> bytes:
         """

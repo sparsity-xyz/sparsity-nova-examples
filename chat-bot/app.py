@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 
 # Enclaver odyn API endpoint (internal)
-ODYN_API = "http://localhost:18000" if os.getenv("IN_DOCKER", "False").lower() == "true" else os.getenv("MOCK_ODYN_API", "http://54.215.216.173:18000")
+ODYN_API = "http://localhost:18000" if os.getenv("IN_DOCKER", "False").lower() == "true" else os.getenv("MOCK_ODYN_API", "http://3.101.68.206:18000")
 
 # Initialize enclave helper
 enclave = Enclave(ODYN_API)
@@ -78,11 +78,6 @@ def attestation():
     """Get attestation document from the enclave."""
     try:
         att_doc = enclave.get_attestation()
-        if att_doc.get("mock"):
-            return jsonify({
-                "attestation_doc": att_doc,
-                "mock": True
-            })
         return jsonify({
             "attestation_doc": att_doc
         })

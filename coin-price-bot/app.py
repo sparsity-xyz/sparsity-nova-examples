@@ -82,11 +82,6 @@ def attestation():
     """Get attestation document from the enclave."""
     try:
         att_doc = enclave.get_attestation()
-        if att_doc.get("mock"):
-            return jsonify({
-                "attestation_doc": att_doc,
-                "mock": True
-            })
         return jsonify({
             "attestation_doc": att_doc
         })
