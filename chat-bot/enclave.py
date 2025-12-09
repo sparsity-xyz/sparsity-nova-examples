@@ -41,7 +41,11 @@ class Enclave:
         Returns:
             The attestation document as a dictionary.
         """
-        res = requests.get(f"{self.endpoint}/v1/attestation", timeout=10)
+        res = requests.post(
+            f"{self.endpoint}/v1/attestation",
+            json={"nonce": ""},
+            timeout=10
+        )
         res.raise_for_status()
         return res.json()
     

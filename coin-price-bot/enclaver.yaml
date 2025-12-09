@@ -3,8 +3,8 @@ name: "coin-price-bot"
 target: "coin-price-bot-enclave:latest"
 sources:
   app: "coin-price-bot:latest"
-  odyn: "odyn-dev:latest"
-  sleeve: "enclaver-wrapper-base-dev:latest"
+  # odyn: "odyn-dev:latest"
+  # sleeve: "enclaver-wrapper-base-dev:latest"
 defaults:
   memory_mb: 2048
 ingress:

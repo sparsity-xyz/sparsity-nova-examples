@@ -3,8 +3,8 @@ name: "chat-bot"
 target: "chat-bot-enclave:latest"
 sources:
   app: "chat-bot:latest"
-  odyn: "odyn-dev:latest"
-  sleeve: "enclaver-wrapper-base-dev:latest"
+  # odyn: "odyn-dev:latest"
+  # sleeve: "enclaver-wrapper-base-dev:latest"
 defaults:
   memory_mb: 2048
 ingress:
