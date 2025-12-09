@@ -132,11 +132,11 @@ class Enclave:
         # Create a hash of the message
         message_hash = hashlib.sha256(message_bytes).hexdigest()
         
-        # Sign using the enclave's key
+        # Sign using the enclave's key (odyn expects 'message_hash' field)
         res = requests.post(
             f"{self.endpoint}/v1/eth/sign",
             json={
-                "message": f"0x{message_hash}",
+                "message_hash": f"0x{message_hash}",
                 "include_attestation": False
             },
             headers={"Content-Type": "application/json"},
