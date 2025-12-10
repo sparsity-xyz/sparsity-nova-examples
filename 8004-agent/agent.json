@@ -7,10 +7,16 @@
     "tee_arch": "nitro",
     "zk_type": "Succinct",
     "network": "base-sepolia",
+    "docs": "/docs",
+    "response_format": {
+        "sig": "hex-encoded signature over data (EIP-191 personal message)",
+        "data": "string payload returned by the endpoint"
+    },
     "endpoints": [
         "/",
         "/ping",
         "/agent.json",
+        "/openapi.json",
         "/attestation",
         "/hello_world",
         "/add_two",

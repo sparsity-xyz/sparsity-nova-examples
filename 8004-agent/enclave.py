@@ -9,6 +9,7 @@ import json
 import hashlib
 import requests
 from typing import Dict, Any, Optional, Tuple
+from eth_account.messages import defunct_hash_message
 
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
@@ -124,6 +125,26 @@ class Enclave:
             f"{self.endpoint}/v1/eth/sign",
             json={
                 "message_hash": f"0x{message_hash}",
+                "include_attestation": False
+            },
+            headers={"Content-Type": "application/json"},
+            timeout=10
+        )
+        res.raise_for_status()
+        return res.json()["signature"]
+
+    def sign_data(self, data: str) -> str:
+        """
+        Sign plain text data using Ethereum personal message hash (EIP-191).
+        Matches verifier expectation in tutorial repository.
+        """
+        msg_hash = defunct_hash_message(text=data)
+        hash_hex = msg_hash.hex()[2:] if msg_hash.hex().startswith("0x") else msg_hash.hex()
+
+        res = requests.post(
+            f"{self.endpoint}/v1/eth/sign",
+            json={
+                "message_hash": f"0x{hash_hex}",
                 "include_attestation": False
             },
             headers={"Content-Type": "application/json"},

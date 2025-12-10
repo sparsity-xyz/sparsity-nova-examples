@@ -1,20 +1,22 @@
 #!/usr/bin/env python3
 """
-8004-Agent - A TEE-based agent service running on AWS Nitro Enclave.
+8004-Agent - FastAPI version running inside AWS Nitro Enclave.
 
-This service runs inside an AWS Nitro Enclave using the enclaver tool.
-It provides a simple agent with OpenAI chat integration.
+This service uses FastAPI to expose the same endpoints with automatic
+OpenAPI exposure at /openapi.json and Swagger UI at /docs.
 """
 
 import json
 import os
 import time
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Optional
 from pathlib import Path
 
-from flask import Flask, jsonify, request
 import httpx
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+from fastapi.responses import JSONResponse
 
 from enclave import Enclave
 
@@ -25,7 +27,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-app = Flask(__name__)
+app = FastAPI(
+    title="8004-Agent",
+    version="1.0.0",
+    description="TEE-based agent service running inside AWS Nitro Enclave"
+)
 
 # Default mock odyn API endpoint
 DEFAULT_MOCK_ODYN_API = "http://3.101.68.206:18000"
@@ -45,6 +51,31 @@ _openai_api_key: Optional[str] = None
 # Agent card cache
 _agent_card_cache: Optional[Dict] = None
 _agent_card_mtime: Optional[float] = None
+
+
+class AddTwoRequest(BaseModel):
+    a: int
+    b: int
+
+
+class SetEncryptedApiKeyRequest(BaseModel):
+    nonce: str
+    public_key: str
+    encrypted_key: str
+
+
+class ChatRequest(BaseModel):
+    prompt: str
+
+
+def signed_response(data: str) -> Dict[str, str]:
+    """Return response with signature and data fields."""
+    try:
+        sig = enclave.sign_data(data)
+        return {"sig": sig, "data": data}
+    except Exception as e:
+        logger.error(f"Signing failed: {e}")
+        raise HTTPException(status_code=500, detail="Signing failed")
 
 
 def load_agent_card(force: bool = False) -> Dict:
@@ -72,12 +103,14 @@ def load_agent_card(force: bool = False) -> Dict:
         return {}
 
 
-@app.route('/')
-def index():
+
+
+@app.get("/")
+async def index():
     """Health check endpoint with service information."""
     try:
         address = enclave.eth_address()
-        return jsonify({
+        return {
             "status": "ok",
             "service": "8004-Agent",
             "version": "1.0.0",
@@ -88,85 +121,76 @@ def index():
                 "/ping": "Simple ping/pong",
                 "/attestation": "Get attestation document",
                 "/agent.json": "Get agent card",
+                "/openapi.json": "OpenAPI schema",
+                "/docs": "Swagger UI",
                 "/get_encryption_key": "GET - Get encryption public key and instructions",
                 "/set_encrypted_apikey": "POST - Set OpenAI API key (encrypted)",
                 "/hello_world": "Simple hello world",
                 "/add_two": "POST - Add two numbers",
                 "/chat": "POST - Chat with OpenAI"
             }
-        })
+        }
     except Exception as e:
         logger.error(f"Health check error: {e}")
-        return jsonify({"status": "error", "error": str(e)}), 500
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.route('/ping')
-def ping():
+@app.get("/ping")
+async def ping():
     """Simple ping endpoint."""
-    return jsonify({"pong": int(time.time())})
+    return {"pong": int(time.time())}
 
 
-@app.route('/attestation')
-def attestation():
+@app.get("/attestation")
+async def attestation():
     """Get attestation document from the enclave."""
     try:
         att_doc = enclave.get_attestation()
         public_key_der = enclave.get_encryption_public_key_der()
-        return jsonify({
+        return {
             "attestation_doc": att_doc,
             "public_key": public_key_der.hex()
-        })
+        }
     except Exception as e:
         logger.error(f"Attestation error: {e}")
-        return jsonify({"error": str(e)}), 500
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.route('/agent.json')
-def agent_card():
+@app.get("/agent.json")
+async def agent_card():
     """Return JSON metadata card."""
-    return jsonify(load_agent_card())
+    return load_agent_card()
 
 
-@app.route('/hello_world')
-def hello_world():
+@app.get("/hello_world")
+async def hello_world():
     """Simple hello world endpoint."""
-    return jsonify({"message": "Hello World", "timestamp": int(time.time())})
+    return signed_response("Hello World")
 
 
-@app.route('/add_two', methods=['POST'])
-def add_two():
+@app.post("/add_two")
+async def add_two(body: AddTwoRequest):
     """Add two numbers."""
     try:
-        body = request.get_json()
-        if not body:
-            return jsonify({"error": "Request body is required"}), 400
-        
-        a = body.get("a")
-        b = body.get("b")
-        
-        if a is None or b is None:
-            return jsonify({"error": "Both 'a' and 'b' are required"}), 400
-        
-        result = int(a) + int(b)
-        return jsonify({"result": result, "a": a, "b": b})
+        result = int(body.a) + int(body.b)
+        return signed_response(str(result))
     except ValueError as e:
-        return jsonify({"error": f"Invalid number format: {e}"}), 400
+        raise HTTPException(status_code=400, detail=f"Invalid number format: {e}")
     except Exception as e:
         logger.error(f"add_two error: {e}")
-        return jsonify({"error": str(e)}), 500
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.route('/get_encryption_key')
-def get_encryption_key():
+@app.get("/get_encryption_key")
+async def get_encryption_key():
     """
     Get the encryption public key and instructions for encrypting the API key.
-    
     Returns the P-384 public key in DER format (hex) and encryption instructions.
     """
     try:
         public_key_der = enclave.get_encryption_public_key_der()
-        
-        return jsonify({
+
+        return {
             "public_key": public_key_der.hex(),
             "algorithm": "P-384 ECDH + AES-256-GCM",
             "instructions": {
@@ -178,101 +202,64 @@ def get_encryption_key():
                 "step6": "POST to /set_encrypted_apikey with: {nonce: hex, public_key: your_ephemeral_public_key_der_hex, encrypted_key: ciphertext_hex}"
             },
             "example": "See README.md for complete Python example code"
-        })
+        }
     except Exception as e:
         logger.error(f"get_encryption_key error: {e}")
-        return jsonify({"error": str(e)}), 500
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.route('/set_encrypted_apikey', methods=['POST'])
-def set_encrypted_apikey():
-    """
-    Set the OpenAI API key for chat endpoint.
-    
-    The API key must be encrypted. Get the encryption key from /get_encryption_key first.
-    
-    Request body:
-    {
-        "nonce": "32-byte-nonce-hex",
-        "public_key": "your-ephemeral-public-key-der-hex",
-        "encrypted_key": "aes-gcm-ciphertext-hex"
-    }
-    """
+@app.post("/set_encrypted_apikey")
+async def set_encrypted_apikey(body: SetEncryptedApiKeyRequest):
+    """Set the OpenAI API key for chat endpoint."""
     global _openai_api_key
-    
+
     try:
-        body = request.get_json()
-        if not body:
-            return jsonify({"error": "Request body is required"}), 400
-        
-        nonce = body.get("nonce")
-        public_key = body.get("public_key")
-        encrypted_key = body.get("encrypted_key")
-        
-        if not nonce or not public_key or not encrypted_key:
-            return jsonify({
-                "error": "'nonce', 'public_key', and 'encrypted_key' are required. Get encryption key from /get_encryption_key first."
-            }), 400
-        
         # Decrypt the API key
         try:
-            api_key = enclave.decrypt_data(nonce, public_key, encrypted_key)
+            api_key = enclave.decrypt_data(body.nonce, body.public_key, body.encrypted_key)
         except Exception as e:
             logger.error(f"Decryption failed: {e}")
-            return jsonify({"error": f"Decryption failed: {str(e)}"}), 400
-        
+            raise HTTPException(status_code=400, detail=f"Decryption failed: {str(e)}")
+
         _openai_api_key = api_key
         logger.info("OpenAI API key has been set (encrypted submission)")
-        
-        return jsonify({
-            "status": "ok",
-            "message": "API key has been set successfully"
-        })
+
+        return {"status": "ok", "message": "API key has been set successfully"}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"set_encrypted_apikey error: {e}")
-        return jsonify({"error": str(e)}), 500
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.route('/chat', methods=['POST'])
-def chat():
-    """
-    Chat with OpenAI.
-    
-    Request body:
-    {
-        "prompt": "Your message here"
-    }
-    
-    Note: API key must be set via /set_encrypted_apikey first.
-    """
+@app.post("/chat")
+async def chat(body: ChatRequest):
+    """Chat with OpenAI."""
     global _openai_api_key
-    
+
     try:
-        # Check if API key is set
         if not _openai_api_key:
-            return jsonify({
-                "error": "OpenAI API key not set",
-                "guidance": {
-                    "step1": "GET /get_encryption_key to get the server's public key",
-                    "step2": "Encrypt your OpenAI API key using the provided instructions",
-                    "step3": "POST /set_encrypted_apikey with the encrypted key",
-                    "example": "See README.md for complete Python example code"
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "OpenAI API key not set",
+                    "guidance": {
+                        "step1": "GET /get_encryption_key to get the server's public key",
+                        "step2": "Encrypt your OpenAI API key using the provided instructions",
+                        "step3": "POST /set_encrypted_apikey with the encrypted key",
+                        "example": "See README.md for complete Python example code"
+                    }
                 }
-            }), 400
-        
-        body = request.get_json()
-        if not body:
-            return jsonify({"error": "Request body is required"}), 400
-        
-        prompt = body.get("prompt")
+            )
+
+        prompt = body.prompt
         if not prompt:
-            return jsonify({"error": "'prompt' is required"}), 400
-        
+            raise HTTPException(status_code=400, detail="'prompt' is required")
+
         logger.info(f"Chat request: {prompt[:50]}...")
-        
-        # Call OpenAI API
-        with httpx.Client(timeout=60.0) as client:
-            response = client.post(
+
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(
                 "https://api.openai.com/v1/chat/completions",
                 headers={
                     "Authorization": f"Bearer {_openai_api_key}",
@@ -283,37 +270,47 @@ def chat():
                     "messages": [{"role": "user", "content": prompt}]
                 }
             )
-        
+
         result = response.json()
-        logger.info(f"OpenAI response received")
-        
+        logger.info("OpenAI response received")
+
         if "error" in result:
-            return jsonify({"error": result["error"]}), 500
-        
-        return jsonify({
-            "response": result["choices"][0]["message"]["content"],
-            "timestamp": int(time.time())
-        })
-        
+            raise HTTPException(status_code=500, detail=result["error"])
+
+        content = result["choices"][0]["message"]["content"]
+        return signed_response(content)
+
     except httpx.TimeoutException:
-        return jsonify({"error": "OpenAI API request timed out"}), 504
+        raise HTTPException(status_code=504, detail="OpenAI API request timed out")
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Chat error: {e}")
-        return jsonify({"error": str(e)}), 500
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/openapi.json")
+async def custom_openapi():
+    """Expose the generated OpenAPI schema explicitly."""
+    return JSONResponse(content=app.openapi())
 
 
 if __name__ == "__main__":
-    logger.info("Starting 8004-Agent service...")
+    logger.info("Starting 8004-Agent service (FastAPI)...")
     logger.info(f"ODYN API endpoint: {ODYN_API}")
     logger.info("Endpoints:")
     logger.info("  GET  /                    - Health check")
     logger.info("  GET  /ping                - Ping/pong")
     logger.info("  GET  /attestation         - Get attestation document")
     logger.info("  GET  /agent.json          - Agent card")
+    logger.info("  GET  /openapi.json        - OpenAPI schema")
+    logger.info("  GET  /docs                - Swagger UI")
     logger.info("  GET  /hello_world         - Hello world")
     logger.info("  POST /add_two             - Add two numbers")
     logger.info("  GET  /get_encryption_key  - Get encryption public key")
     logger.info("  POST /set_encrypted_apikey         - Set OpenAI API key (encrypted)")
     logger.info("  POST /chat                - Chat with OpenAI")
-    
-    app.run(host='0.0.0.0', port=8000)
+
+    import uvicorn
+
+    uvicorn.run("app:app", host="0.0.0.0", port=8000)
