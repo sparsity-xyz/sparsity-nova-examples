@@ -186,14 +186,13 @@ class TEEClient:
             algorithm=hashes.SHA256(),
             length=32,
             salt=None,
-            info=nonce, 
+            info=b"encryption data",
             backend=None
         ).derive(shared_key)
         
         # AES-GCM
         aesgcm = AESGCM(derived_key)
-        # Use first 12 bytes of nonce for IV
-        ciphertext = aesgcm.encrypt(nonce[:12], json.dumps(data).encode(), None)
+        ciphertext = aesgcm.encrypt(nonce, json.dumps(data).encode(), None)
         
         return {
             "nonce": nonce.hex(),
@@ -226,12 +225,12 @@ class TEEClient:
             algorithm=hashes.SHA256(),
             length=32,
             salt=None,
-            info=nonce,
+            info=b"encryption data",
             backend=None
         ).derive(shared_key)
         
         aesgcm = AESGCM(derived_key)
-        plaintext = aesgcm.decrypt(nonce[:12], encrypted_data, None)
+        plaintext = aesgcm.decrypt(nonce, encrypted_data, None)
         
         return json.loads(plaintext)
 
@@ -278,5 +277,5 @@ class TEEClient:
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
-    client = TEEClient("https://vmi.sparsity.ai/chat_bot")
+    client = TEEClient("http://54.183.193.170:8040")
     print(f"Initialized: {client.init_keys()}")
