@@ -31,7 +31,11 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 
 # Enclaver odyn API endpoint (internal)
-ODYN_API = "http://localhost:18000" if os.getenv("IN_DOCKER", "False").lower() == "true" else os.getenv("MOCK_ODYN_API", "http://3.101.68.206:18000")
+# Default mock odyn API endpoint
+DEFAULT_MOCK_ODYN_API = "http://3.101.68.206:18000"
+
+# Enclaver odyn API endpoint (internal)
+ODYN_API = "http://localhost:18000" if os.getenv("IN_DOCKER", "False").lower() == "true" else DEFAULT_MOCK_ODYN_API
 
 # Initialize enclave helper
 enclave = Enclave(ODYN_API)
