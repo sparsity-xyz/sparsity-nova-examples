@@ -1,4 +1,4 @@
-# AI Chat-bot Makefile
+# 8004-Agent Makefile
 
 # Load environment variables from .env
 ifneq (,$(wildcard ./.env))
@@ -11,13 +11,13 @@ SSH_CMD = ssh -i $(EC2_KEY) $(EC2_HOST)
 SCP_CMD = scp -i $(EC2_KEY)
 
 # Image names
-APP_IMAGE = chat-bot:latest
-ENCLAVE_IMAGE = chat-bot-enclave:latest
+APP_IMAGE = 8004-agent:latest
+ENCLAVE_IMAGE = 8004-agent-enclave:latest
 
 .PHONY: all build deploy-enclave get-address status logs stop help
 
 help:
-	@echo "AI Chat-bot - Makefile Commands"
+	@echo "8004-Agent - Makefile Commands"
 	@echo ""
 	@echo "  make build            - Build Docker image locally"
 	@echo "  make deploy-enclave   - Deploy enclave to EC2"
@@ -42,16 +42,16 @@ build:
 # Deploy enclave to EC2
 deploy-enclave:
 	@echo "Transferring source files to EC2..."
-	$(SSH_CMD) "mkdir -p ~/chat-bot"
-	$(SCP_CMD) -r app.py enclave.py requirements.txt Dockerfile enclaver.yaml ai_models $(EC2_HOST):~/chat-bot/
+	$(SSH_CMD) "mkdir -p ~/8004-agent"
+	$(SCP_CMD) -r app.py enclave.py requirements.txt Dockerfile enclaver.yaml agent.json README.md $(EC2_HOST):~/8004-agent/
 	@echo "Building Docker image on EC2..."
-	$(SSH_CMD) "cd ~/chat-bot && docker build -t $(APP_IMAGE) ."
+	$(SSH_CMD) "cd ~/8004-agent && docker build -t $(APP_IMAGE) ."
 	@echo "Building enclave image on EC2..."
-	$(SSH_CMD) "cd ~/chat-bot && ~/enclaver build -f enclaver.yaml"
+	$(SSH_CMD) "cd ~/8004-agent && /usr/local/bin/enclaver build -f enclaver.yaml"
 	@echo "Starting enclave..."
-	$(SSH_CMD) "docker stop chat-bot 2>/dev/null || true && \
-		docker rm chat-bot 2>/dev/null || true && \
-		docker run -d --name chat-bot -p 8000:8000 --privileged --device=/dev/nitro_enclaves:/dev/nitro_enclaves $(ENCLAVE_IMAGE)"
+	$(SSH_CMD) "docker stop 8004-agent 2>/dev/null || true && \
+		docker rm 8004-agent 2>/dev/null || true && \
+		docker run -d --name 8004-agent -p 8000:8000 --privileged --device=/dev/nitro_enclaves:/dev/nitro_enclaves $(ENCLAVE_IMAGE)"
 	@EC2_IP=$$(echo $(EC2_HOST) | cut -d'@' -f2); \
 	echo "Enclave deployed! Access at http://$$EC2_IP:8000"
 
@@ -71,20 +71,39 @@ attestation:
 	@EC2_IP=$$(echo $(EC2_HOST) | cut -d'@' -f2); \
 	curl -s http://$$EC2_IP:8000/attestation | jq .
 
+# Test hello_world endpoint
+test-hello:
+	@EC2_IP=$$(echo $(EC2_HOST) | cut -d'@' -f2); \
+	curl -s http://$$EC2_IP:8000/hello_world | jq .
+
+# Test add_two endpoint
+test-add:
+	@EC2_IP=$$(echo $(EC2_HOST) | cut -d'@' -f2); \
+	curl -s -X POST http://$$EC2_IP:8000/add_two \
+		-H "Content-Type: application/json" \
+		-d '{"a": 5, "b": 3}' | jq .
+
+# Set API key
+set-key:
+	@EC2_IP=$$(echo $(EC2_HOST) | cut -d'@' -f2); \
+	curl -s -X POST http://$$EC2_IP:8000/set_encrypted_apikey \
+		-H "Content-Type: application/json" \
+		-d '{"api_key": "$(OPENAI_API_KEY)"}' | jq .
+
 # Test chat endpoint
 test-chat:
 	@EC2_IP=$$(echo $(EC2_HOST) | cut -d'@' -f2); \
-	curl -s -X POST http://$$EC2_IP:8000/talk \
+	curl -s -X POST http://$$EC2_IP:8000/chat \
 		-H "Content-Type: application/json" \
-		-d '{"api_key": "$(TEST_API_KEY)", "message": "Hello!", "platform": "openai", "ai_model": "gpt-4"}' | jq .
+		-d '{"prompt": "Hello!"}' | jq .
 
 # View enclave logs on EC2
 logs:
-	$(SSH_CMD) "docker logs -f chat-bot"
+	$(SSH_CMD) "docker logs -f 8004-agent"
 
 # Stop enclave on EC2
 stop:
-	$(SSH_CMD) "docker stop chat-bot"
+	$(SSH_CMD) "docker stop 8004-agent"
 
 # Clean up
 clean:

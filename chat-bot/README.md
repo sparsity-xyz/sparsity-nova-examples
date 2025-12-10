@@ -1,104 +1,96 @@
 # AI Chat-bot
 
-This is an AI chatbot service running on the Sparsity Nova Platform using enclaver.
+A secure AI chatbot running on **Sparsity Nova Platform** inside an AWS Nitro Enclave.
+
+> **🚀 Easy Deployment**: Deploy to Nova via [nova.sparsity.xyz](https://nova.sparsity.xyz)  
+> **🌐 Web Interface**: Interact via [agents.sparsity.ai](https://agents.sparsity.ai)
 
 ## Features
 
 - Secure AI chat with signed responses
 - Support for multiple AI platforms:
-  - **OpenAI**: GPT-4, GPT-4-turbo, GPT-3.5-turbo
+  - **OpenAI**: GPT-5.1, GPT-5, GPT-4.1, GPT-4o, GPT-4
   - **Anthropic**: Claude 3 Sonnet, Claude 3 Opus
   - **Gemini**: Gemini 2.0 Flash, Gemini 1.5 Pro/Flash
 - Attestation document for TEE verification
-- Runs inside AWS Nitro Enclave
+- End-to-end encrypted communication
 
-## Architecture
+## Build app image and run
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                    AWS Nitro Enclave                     │
-│                                                          │
-│  ┌─────────────┐     ┌─────────────┐     ┌───────────┐ │
-│  │   app.py    │────▶│  enclave.py │────▶│ odyn API  │ │
-│  │  (Flask)    │     │  (wrapper)  │     │ :18000    │ │
-│  └──────┬──────┘     └─────────────┘     └───────────┘ │
-│         │                                               │
-│         ▼                                               │
-│  ┌─────────────┐                                        │
-│  │  AI Models  │──────▶ OpenAI / Anthropic / Gemini    │
-│  └─────────────┘                                        │
-└─────────────────────────────────────────────────────────┘
-```
-
-## Local Testing
-
-### Requirements
-- Python 3.11+
-- Access to mock odyn API (for local testing)
-
-### Setup
+Build the app image with:
 
 ```bash
-# Install dependencies
-pip install -r requirements.txt
-
-# Set up environment
-cp .env.example .env
-# Edit .env with your configuration
-
-# Run locally (uses mock odyn API)
-python app.py
+docker build -t chat-bot .
 ```
 
-### Test Endpoints
+Verify the app image with:
 
 ```bash
-# Health check
-curl http://localhost:8000/
-
-# Ping
-curl http://localhost:8000/ping
-
-# Attestation
-curl http://localhost:8000/attestation
-
-# Chat (requires API key)
-curl -X POST http://localhost:8000/talk \
-  -H "Content-Type: application/json" \
-  -d '{
-    "api_key": "your-openai-api-key",
-    "message": "Hello!",
-    "platform": "openai",
-    "ai_model": "gpt-4"
-  }'
+docker images chat-bot
 ```
 
-## Deploy on Sparsity Nova Platform
-
-### Build and Deploy
+You can run the app image directly with:
 
 ```bash
-# Set up environment
-cp .env.example .env
-# Edit .env with EC2_KEY and EC2_HOST
-
-# Deploy to EC2
-make deploy-enclave
-
-# Check status
-make status
+docker run --rm -p 8000:8000 chat-bot
+curl http://localhost:8000
 ```
 
-### Available Make Commands
+## Build the enclaver image
 
+The content of `enclaver.yaml` is:
+
+```yaml
+version: v1
+name: "chat-bot"
+target: "chat-bot-enclave:latest"
+sources:
+  app: "chat-bot:latest"
+defaults:
+  memory_mb: 2048
+ingress:
+  - listen_port: 8000
+egress:
+  allow:
+    - "api.openai.com"
+    - "api.anthropic.com"
+    - "generativelanguage.googleapis.com"
+api:
+  listen_port: 18000
+aux_api:
+  listen_port: 18001
 ```
-make build            - Build Docker image locally
-make deploy-enclave   - Deploy enclave to EC2
-make get-address      - Get enclave wallet address
-make status           - Check enclave status
-make attestation      - Get attestation document
-make logs             - View enclave logs
-make stop             - Stop enclave on EC2
+
+The manifest includes:
+- `ingress` - Allows external HTTP traffic on port 8000
+- `egress` - Allows outbound requests to AI provider APIs
+- `api` - Enables the internal API service on port 18000 (provides attestation and key management)
+- `aux_api` - Enables the auxiliary API on port 18001
+
+Build the enclaver image with:
+
+```bash
+enclaver build -f enclaver.yaml
+```
+
+Verify the enclave image with:
+
+```bash
+docker images chat-bot-enclave
+```
+
+## Run enclaver image
+
+Run the enclave image with:
+
+```bash
+enclaver run --publish 8000:8000 --publish 18001:18001 chat-bot-enclave:latest
+```
+
+Test the application:
+
+```bash
+curl http://localhost:8000
 ```
 
 ## API Reference
@@ -106,27 +98,11 @@ make stop             - Stop enclave on EC2
 ### GET /
 Health check endpoint.
 
-**Response:**
-```json
-{
-  "status": "ok",
-  "service": "AI Chatbot",
-  "version": "1.0.0",
-  "enclave_address": "0x...",
-  "supported_platforms": ["openai", "anthropic", "gemini"],
-  "endpoints": {...}
-}
-```
+### GET /ping
+Simple ping endpoint.
 
 ### GET /attestation
 Get the TEE attestation document.
-
-**Response:**
-```json
-{
-  "attestation_doc": "..."
-}
-```
 
 ### POST /talk
 Send a chat message and receive a signed AI response.
@@ -159,6 +135,18 @@ Send a chat message and receive a signed AI response.
 
 | Platform | Models |
 |----------|--------|
-| OpenAI | gpt-4, gpt-4-turbo, gpt-3.5-turbo |
+| OpenAI | gpt-5.1, gpt-5, gpt-5-mini, gpt-4.1, gpt-4.1-mini, gpt-4o, gpt-4o-mini, gpt-4 |
 | Anthropic | claude-3-7-sonnet-20250219, claude-3-opus-20240229, claude-3-sonnet-20240229 |
 | Gemini | gemini-2.0-flash-001, gemini-1.5-pro, gemini-1.5-flash |
+
+## Deploy on Sparsity Nova Platform
+
+This bot is designed to be deployed via the **Nova UI**:
+
+1. Go to [nova.sparsity.xyz](https://nova.sparsity.xyz)
+2. Connect your wallet
+3. Select "Deploy New Agent"
+4. Choose the chat-bot image or provide the Docker image
+5. Configure resources and deploy
+
+Once deployed, the bot will be accessible via [agents.sparsity.ai](https://agents.sparsity.ai).

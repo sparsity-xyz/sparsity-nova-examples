@@ -1,38 +1,16 @@
 # Coin Price Bot
 
-A TEE-based service for fetching and analyzing cryptocurrency prices using AI.
+A TEE-based service for fetching and analyzing cryptocurrency prices using AI, running on **Sparsity Nova Platform**.
+
+> **🚀 Easy Deployment**: Deploy to Nova via [nova.sparsity.xyz](https://nova.sparsity.xyz)  
+> **🌐 Web Interface**: Interact via [agents.sparsity.ai](https://agents.sparsity.ai)
 
 ## Features
 
 - Secure AI-powered price queries with signed responses
 - TEE-to-TEE communication with chat-bot for AI inference
 - Automatic URL discovery and content summarization
-- Runs inside AWS Nitro Enclave
-
-## Architecture
-
-```
-┌──────────────────────────────────────────────────────────────────────┐
-│                         AWS Nitro Enclave                             │
-│                                                                       │
-│  ┌─────────────┐     ┌─────────────┐     ┌─────────────────────────┐│
-│  │   app.py    │────▶│ tee_client  │────▶│ chat-bot TEE            ││
-│  │  (Flask)    │     │  (client)   │     │ (vmi.sparsity.ai)       ││
-│  └──────┬──────┘     └─────────────┘     └─────────────────────────┘│
-│         │                                                            │
-│         ▼                                                            │
-│  ┌─────────────┐     ┌─────────────┐                                │
-│  │  utils.py   │────▶│ Web URLs    │                                │
-│  │  (fetch)    │     │ (HTML)      │                                │
-│  └─────────────┘     └─────────────┘                                │
-│         │                                                            │
-│         ▼                                                            │
-│  ┌─────────────┐     ┌─────────────┐                                │
-│  │  enclave.py │────▶│ odyn API    │                                │
-│  │  (wrapper)  │     │ :18000      │                                │
-│  └─────────────┘     └─────────────┘                                │
-└──────────────────────────────────────────────────────────────────────┘
-```
+- End-to-end encrypted communication
 
 ## Workflow
 
@@ -43,78 +21,80 @@ A TEE-based service for fetching and analyzing cryptocurrency prices using AI.
 5. Chat-bot TEE creates a final summary combining all sources
 6. Response is signed and returned to user
 
-## Local Testing
+## Build app image and run
 
-### Requirements
-- Python 3.11+
-- Access to mock odyn API
-- Access to chat-bot TEE endpoint
-
-### Setup
+Build the app image with:
 
 ```bash
-# Install dependencies
-pip install -r requirements.txt
-
-# Set up environment
-cp .env.example .env
-# Edit .env with your configuration
-
-# Run locally
-python app.py
+docker build -t coin-price-bot .
 ```
 
-### Test Endpoints
+Verify the app image with:
 
 ```bash
-# Health check
-curl http://localhost:8000/
-
-# Ping
-curl http://localhost:8000/ping
-
-# Test network access
-curl http://localhost:8000/query
-
-# Query coin prices (requires API key)
-curl -X POST http://localhost:8000/talk \
-  -H "Content-Type: application/json" \
-  -d '{
-    "api_key": "your-openai-api-key",
-    "message": "What is the current price of Bitcoin?",
-    "platform": "openai",
-    "ai_model": "gpt-4"
-  }'
+docker images coin-price-bot
 ```
 
-## Deploy on Sparsity Nova Platform
-
-### Build and Deploy
+You can run the app image directly with:
 
 ```bash
-# Set up environment
-cp .env.example .env
-# Edit .env with EC2_KEY and EC2_HOST
-
-# Deploy to EC2
-make deploy-enclave
-
-# Check status
-make status
+docker run --rm -p 8000:8000 coin-price-bot
+curl http://localhost:8000
 ```
 
-### Available Make Commands
+## Build the enclaver image
 
+The content of `enclaver.yaml` is:
+
+```yaml
+version: v1
+name: "coin-price-bot"
+target: "coin-price-bot-enclave:latest"
+sources:
+  app: "coin-price-bot:latest"
+defaults:
+  memory_mb: 2048
+ingress:
+  - listen_port: 8000
+egress:
+  allow:
+    - "*"
+api:
+  listen_port: 18000
+aux_api:
+  listen_port: 18001
 ```
-make build            - Build Docker image locally
-make deploy-enclave   - Deploy enclave to EC2
-make get-address      - Get enclave wallet address
-make status           - Check enclave status
-make attestation      - Get attestation document
-make test-query       - Test network access
-make test-talk        - Test coin price query
-make logs             - View enclave logs
-make stop             - Stop enclave on EC2
+
+The manifest includes:
+- `ingress` - Allows external HTTP traffic on port 8000
+- `egress` - Allows outbound requests (to fetch web content and communicate with chat-bot TEE)
+- `api` - Enables the internal API service on port 18000 (provides attestation and key management)
+- `aux_api` - Enables the auxiliary API on port 18001
+
+Build the enclaver image with:
+
+```bash
+enclaver build -f enclaver.yaml
+```
+
+Verify the enclave image with:
+
+```bash
+docker images coin-price-bot-enclave
+```
+
+## Run enclaver image
+
+Run the enclave image with:
+
+```bash
+enclaver run --publish 8000:8000 --publish 18001:18001 coin-price-bot-enclave:latest
+```
+
+Test the application:
+
+```bash
+curl http://localhost:8000
 ```
 
 ## API Reference
@@ -122,17 +102,8 @@ make stop             - Stop enclave on EC2
 ### GET /
 Health check endpoint.
 
-**Response:**
-```json
-{
-  "status": "ok",
-  "service": "Coin Price Bot",
-  "version": "1.0.0",
-  "enclave_address": "0x...",
-  "chat_bot_endpoint": "https://vmi.sparsity.ai/chat_bot",
-  "endpoints": {...}
-}
-```
+### GET /ping
+Simple ping endpoint.
 
 ### GET /attestation
 Get the TEE attestation document.
@@ -157,13 +128,7 @@ Query coin prices and get AI-powered analysis.
   "data": [
     {
       "description": "urls to resolve query",
-      "attestation_endpoint": "https://vmi.sparsity.ai/chat_bot/attestation",
-      "sig": "...",
-      "data": {...}
-    },
-    {
-      "description": "summaries for the url content",
-      "attestation_endpoint": "...",
+      "attestation_endpoint": "https://chat-bot-endpoint/attestation",
       "sig": "...",
       "data": {...}
     },
@@ -182,3 +147,15 @@ Query coin prices and get AI-powered analysis.
 This service depends on:
 - **chat-bot TEE**: For AI inference (URL discovery and content summarization)
 - **odyn API**: For attestation and signing (provided by enclaver)
+
+## Deploy on Sparsity Nova Platform
+
+This bot is designed to be deployed via the **Nova UI**:
+
+1. Go to [nova.sparsity.xyz](https://nova.sparsity.xyz)
+2. Connect your wallet
+3. Select "Deploy New Agent"
+4. Choose the coin-price-bot image or provide the Docker image
+5. Configure resources and deploy
+
+Once deployed, the bot will be accessible via [agents.sparsity.ai](https://agents.sparsity.ai).

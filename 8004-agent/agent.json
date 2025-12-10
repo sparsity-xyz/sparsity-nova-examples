@@ -1,0 +1,22 @@
+{
+    "name": "8004-Agent",
+    "description": "Example Nitro-enclave-based trustless agent using enclaver",
+    "code_repository": "https://github.com/sparsity-xyz/sparsity-nova-examples",
+    "version": "1.0.0",
+    "schema_version": 1,
+    "tee_arch": "nitro",
+    "zk_type": "Succinct",
+    "network": "base-sepolia",
+    "endpoints": [
+        "/",
+        "/ping",
+        "/agent.json",
+        "/attestation",
+        "/hello_world",
+        "/add_two",
+        "/get_encryption_key",
+        "/set_encrypted_apikey",
+        "/chat"
+    ],
+    "attestation_endpoint": "/attestation"
+}
