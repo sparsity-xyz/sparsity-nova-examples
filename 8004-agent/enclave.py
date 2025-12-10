@@ -43,7 +43,7 @@ class Enclave:
         res.raise_for_status()
         return res.json()["address"]
     
-    def get_attestation(self, user_data: Optional[str] = "") -> str:
+    def get_attestation(self, user_data: Optional[Dict[str, Any]] = None) -> str:
         """
         Get the attestation document from the enclave.
         
@@ -51,11 +51,14 @@ class Enclave:
         We base64-encode it for JSON transport.
         
         Args:
-            user_data: Optional user data to embed in attestation (string);
-                passes through to odyn API.
+            user_data: Optional dict with custom fields to embed in attestation.
+                The enclave will automatically add 'eth_addr' to this dict.
+                If None, the attestation will contain only {"eth_addr": "0x..."}.
 
         Returns:
             Base64-encoded CBOR attestation document string.
+            The user_data field in the attestation will be a JSON dict
+            containing eth_addr and any custom fields provided.
         """
         import base64
         
@@ -65,13 +68,18 @@ class Enclave:
             format=serialization.PublicFormat.SubjectPublicKeyInfo
         ).decode('utf-8')
         
+        payload = {
+            "nonce": "",
+            "public_key": encryption_pub_key_pem,
+        }
+        
+        # If user_data dict is provided, include it (enclave will add eth_addr)
+        if user_data is not None:
+            payload["user_data"] = user_data
+        
         res = requests.post(
             f"{self.endpoint}/v1/attestation",
-            json={
-                "nonce": "",
-                "public_key": encryption_pub_key_pem,
-                "user_data": user_data or ""
-            },
+            json=payload,
             timeout=10
         )
         res.raise_for_status()
