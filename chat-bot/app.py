@@ -82,8 +82,11 @@ def attestation():
     """Get attestation document from the enclave."""
     try:
         att_doc = enclave.get_attestation()
+        # Include the encryption public key in the response for easy client access
+        public_key_der = enclave.get_encryption_public_key_der()
         return jsonify({
-            "attestation_doc": att_doc
+            "attestation_doc": att_doc,
+            "public_key": public_key_der.hex()
         })
     except Exception as e:
         logger.error(f"Attestation error: {e}")
