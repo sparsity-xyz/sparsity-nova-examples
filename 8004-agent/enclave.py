@@ -6,10 +6,8 @@ inside the enclave environment.
 """
 
 import json
-import hashlib
 import requests
 from typing import Dict, Any, Optional, Tuple
-from eth_account.messages import defunct_hash_message
 
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
@@ -45,13 +43,17 @@ class Enclave:
         res.raise_for_status()
         return res.json()["address"]
     
-    def get_attestation(self) -> str:
+    def get_attestation(self, user_data: Optional[str] = "") -> str:
         """
         Get the attestation document from the enclave.
         
         The odyn API returns CBOR-encoded attestation document as binary data.
         We base64-encode it for JSON transport.
         
+        Args:
+            user_data: Optional user data to embed in attestation (string);
+                passes through to odyn API.
+
         Returns:
             Base64-encoded CBOR attestation document string.
         """
@@ -67,7 +69,8 @@ class Enclave:
             f"{self.endpoint}/v1/attestation",
             json={
                 "nonce": "",
-                "public_key": encryption_pub_key_pem
+                "public_key": encryption_pub_key_pem,
+                "user_data": user_data or ""
             },
             timeout=10
         )
@@ -108,50 +111,27 @@ class Enclave:
         return bytes.fromhex(random_hex)[:count]
     
     def sign_message(self, data: Dict[str, Any]) -> str:
-        """
-        Sign a message using the enclave's key.
-        
-        Args:
-            data: Dictionary to sign.
-            
-        Returns:
-            Hex-encoded signature.
-        """
+        """Sign a dict payload by canonical JSON then /v1/eth/sign (EIP-191 prefix inside enclaver)."""
         message = json.dumps(data, sort_keys=True, separators=(',', ':'))
-        message_bytes = message.encode('utf-8')
-        message_hash = hashlib.sha256(message_bytes).hexdigest()
-        
-        res = requests.post(
-            f"{self.endpoint}/v1/eth/sign",
-            json={
-                "message_hash": f"0x{message_hash}",
-                "include_attestation": False
-            },
-            headers={"Content-Type": "application/json"},
-            timeout=10
-        )
-        res.raise_for_status()
-        return res.json()["signature"]
+        return self.sign_data(message)
 
     def sign_data(self, data: str) -> str:
         """
-        Sign plain text data using Ethereum personal message hash (EIP-191).
-        Matches verifier expectation in tutorial repository.
+        Sign plain text data using enclaver's /v1/eth/sign (EIP-191 inside enclaver).
+        Returns hex signature without 0x prefix for verifier compatibility.
         """
-        msg_hash = defunct_hash_message(text=data)
-        hash_hex = msg_hash.hex()[2:] if msg_hash.hex().startswith("0x") else msg_hash.hex()
-
         res = requests.post(
             f"{self.endpoint}/v1/eth/sign",
             json={
-                "message_hash": f"0x{hash_hex}",
+                "message": data,
                 "include_attestation": False
             },
             headers={"Content-Type": "application/json"},
             timeout=10
         )
         res.raise_for_status()
-        return res.json()["signature"]
+        sig = res.json()["signature"]
+        return sig[2:] if sig.startswith("0x") else sig
     
     def get_public_key(self) -> str:
         """

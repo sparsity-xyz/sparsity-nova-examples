@@ -147,9 +147,11 @@ async def attestation():
     try:
         att_doc = enclave.get_attestation()
         public_key_der = enclave.get_encryption_public_key_der()
+        eth_address = enclave.eth_address()
         return {
             "attestation_doc": att_doc,
-            "public_key": public_key_der.hex()
+            "public_key": public_key_der.hex(),
+            "eth_address": eth_address,
         }
     except Exception as e:
         logger.error(f"Attestation error: {e}")
