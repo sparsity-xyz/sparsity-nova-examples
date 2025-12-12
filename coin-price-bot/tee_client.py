@@ -153,8 +153,17 @@ class TEEClient:
             logger.info("Keys initialized successfully")
             return True
             
+        except requests.Timeout as e:
+            logger.error(f"Connection timeout to {self.endpoint}: {e}")
+            self.last_error = f"Connection timeout to {self.endpoint}"
+            return False
+        except requests.ConnectionError as e:
+            logger.error(f"Connection error to {self.endpoint}: {e}")
+            self.last_error = f"Cannot connect to chat-bot at {self.endpoint}: {e}"
+            return False
         except Exception as e:
             logger.error(f"Failed to init keys: {e}")
+            self.last_error = f"Init keys failed: {e}"
             return False
 
     def encrypt_request(self, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -237,7 +246,12 @@ class TEEClient:
     def talk(self, api_key: str, message: str, platform: str = "openai", ai_model: str = "gpt-4") -> Dict[str, Any]:
         if not self.initialized:
             if not self.init_keys():
-                return {"error": "Failed to initialize TEE client"}
+                return {
+                    "error": f"Failed to initialize TEE client for {self.endpoint}",
+                    "error_type": "init_failed",
+                    "endpoint": self.endpoint,
+                    "detail": getattr(self, 'last_error', 'Unknown initialization error')
+                }
         
         try:
             payload = {
@@ -272,8 +286,22 @@ class TEEClient:
             
             return result
             
+        except requests.Timeout as e:
+            error_msg = f"Chat-bot request timeout ({self.endpoint}): {e}"
+            logger.error(error_msg)
+            return {"error": error_msg, "error_type": "timeout", "endpoint": self.endpoint}
+        except requests.ConnectionError as e:
+            error_msg = f"Cannot connect to chat-bot at {self.endpoint}: {e}"
+            logger.error(error_msg)
+            return {"error": error_msg, "error_type": "connection", "endpoint": self.endpoint}
+        except requests.HTTPError as e:
+            error_msg = f"Chat-bot HTTP error ({e.response.status_code}): {e}"
+            logger.error(error_msg)
+            return {"error": error_msg, "error_type": "http", "endpoint": self.endpoint, "status_code": e.response.status_code}
         except Exception as e:
-            return {"error": f"Error: {str(e)}"}
+            error_msg = f"Chat-bot error: {str(e)}"
+            logger.error(error_msg)
+            return {"error": error_msg, "error_type": "unknown", "endpoint": self.endpoint}
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)

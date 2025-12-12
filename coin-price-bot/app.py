@@ -10,7 +10,7 @@ import json
 import os
 import time
 import logging
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 from flask import Flask, jsonify, request
 
@@ -33,8 +33,11 @@ DEFAULT_MOCK_ODYN_API = "http://3.101.68.206:18000"
 # Enclaver odyn API endpoint (internal)
 ODYN_API = "http://localhost:18000" if os.getenv("IN_DOCKER", "False").lower() == "true" else DEFAULT_MOCK_ODYN_API
 
-# Chat-bot TEE endpoint for AI queries
-CHAT_BOT_ENDPOINT = "https://76.app.zfdang.com"
+# Default Chat-bot TEE endpoint for AI queries
+DEFAULT_CHAT_BOT_ENDPOINT = "https://81.app.zfdang.com"
+
+# Custom chat-bot endpoint (can be set via API)
+_custom_chat_bot_endpoint: Optional[str] = None
 
 # Initialize enclave helper
 enclave = Enclave(ODYN_API)
@@ -43,11 +46,20 @@ enclave = Enclave(ODYN_API)
 tee_client = None
 
 
+def get_chat_bot_endpoint() -> str:
+    """Get the current chat-bot endpoint (custom or default)."""
+    return _custom_chat_bot_endpoint if _custom_chat_bot_endpoint else DEFAULT_CHAT_BOT_ENDPOINT
+
+
 def get_tee_client():
-    """Lazy initialization of TEE client."""
+    """Lazy initialization of TEE client. Reinitializes if endpoint changed."""
     global tee_client
-    if tee_client is None:
-        tee_client = TEEClient(CHAT_BOT_ENDPOINT)
+    current_endpoint = get_chat_bot_endpoint()
+    
+    if tee_client is None or tee_client.endpoint != current_endpoint:
+        logger.info(f"Initializing TEE client with endpoint: {current_endpoint}")
+        tee_client = TEEClient(current_endpoint)
+    
     return tee_client
 
 
@@ -56,17 +68,21 @@ def index():
     """Health check endpoint with service information."""
     try:
         address = enclave.eth_address()
+        current_endpoint = get_chat_bot_endpoint()
         return jsonify({
             "status": "ok",
             "service": "Coin Price Bot",
             "version": "1.0.0",
             "enclave_address": address,
-            "chat_bot_endpoint": CHAT_BOT_ENDPOINT,
+            "chat_bot_endpoint": current_endpoint,
+            "chat_bot_endpoint_is_custom": _custom_chat_bot_endpoint is not None,
             "endpoints": {
                 "/": "Health check and service info",
                 "/ping": "Simple ping/pong",
                 "/attestation": "Get attestation document",
-                "/talk": "POST - Query coin prices (requires JSON body)"
+                "/talk": "POST - Query coin prices (requires JSON body)",
+                "/set_chat_bot_endpoint": "POST - Set custom chat-bot endpoint",
+                "/get_chat_bot_endpoint": "GET - Get current chat-bot endpoint"
             }
         })
     except Exception as e:
@@ -94,6 +110,72 @@ def attestation():
     except Exception as e:
         logger.error(f"Attestation error: {e}")
         return jsonify({"error": str(e)}), 500
+
+
+@app.route('/set_chat_bot_endpoint', methods=['POST'])
+def set_chat_bot_endpoint():
+    """
+    Set a custom chat-bot endpoint URL.
+    
+    JSON body:
+    {
+        "endpoint": "https://example.com"
+    }
+    
+    To reset to default, set endpoint to null or empty string.
+    """
+    global _custom_chat_bot_endpoint, tee_client
+    
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "Request body is required"}), 400
+        
+        endpoint = data.get("endpoint", "").strip()
+        
+        if endpoint:
+            # Validate URL format
+            if not endpoint.startswith(("http://", "https://")):
+                return jsonify({"error": "Invalid endpoint URL. Must start with http:// or https://"}), 400
+            
+            _custom_chat_bot_endpoint = endpoint
+            # Reset tee_client so it reinitializes with new endpoint
+            tee_client = None
+            logger.info(f"Chat-bot endpoint set to: {endpoint}")
+            
+            return jsonify({
+                "status": "ok",
+                "message": f"Chat-bot endpoint updated to: {endpoint}",
+                "endpoint": endpoint,
+                "is_custom": True
+            })
+        else:
+            # Reset to default
+            _custom_chat_bot_endpoint = None
+            tee_client = None
+            logger.info(f"Chat-bot endpoint reset to default: {DEFAULT_CHAT_BOT_ENDPOINT}")
+            
+            return jsonify({
+                "status": "ok",
+                "message": f"Chat-bot endpoint reset to default: {DEFAULT_CHAT_BOT_ENDPOINT}",
+                "endpoint": DEFAULT_CHAT_BOT_ENDPOINT,
+                "is_custom": False
+            })
+            
+    except Exception as e:
+        logger.error(f"Set chat-bot endpoint error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/get_chat_bot_endpoint')
+def get_chat_bot_endpoint_route():
+    """Get the current chat-bot endpoint configuration."""
+    current_endpoint = get_chat_bot_endpoint()
+    return jsonify({
+        "endpoint": current_endpoint,
+        "default_endpoint": DEFAULT_CHAT_BOT_ENDPOINT,
+        "is_custom": _custom_chat_bot_endpoint is not None
+    })
 
 
 @app.route('/talk', methods=['POST'])
