@@ -261,7 +261,7 @@ def talk():
         
         req_resp_pairs.append({
             "description": "urls to resolve query",
-            "attestation_endpoint": f"{CHAT_BOT_ENDPOINT}/attestation",
+            "attestation_endpoint": f"{get_chat_bot_endpoint()}/attestation",
             **url_response
         })
         
@@ -288,7 +288,7 @@ def talk():
                 url_summary_dict[url] = summary_response.get("data", {}).get("response", "")
                 req_resp_pairs.append({
                     "description": "summaries for the url content",
-                    "attestation_endpoint": f"{CHAT_BOT_ENDPOINT}/attestation",
+                    "attestation_endpoint": f"{get_chat_bot_endpoint()}/attestation",
                     **summary_response
                 })
             else:
@@ -308,7 +308,7 @@ def talk():
         
         req_resp_pairs.append({
             "description": "final summary combining all url content summaries",
-            "attestation_endpoint": f"{CHAT_BOT_ENDPOINT}/attestation",
+            "attestation_endpoint": f"{get_chat_bot_endpoint()}/attestation",
             **final_response
         })
         
