@@ -131,7 +131,8 @@ def set_chat_bot_endpoint():
         if not data:
             return jsonify({"error": "Request body is required"}), 400
         
-        endpoint = data.get("endpoint", "").strip()
+        endpoint_raw = data.get("endpoint")
+        endpoint = (endpoint_raw.strip() if isinstance(endpoint_raw, str) else "") or ""
         
         if endpoint:
             # Validate URL format
@@ -362,7 +363,7 @@ def test_query():
 if __name__ == "__main__":
     logger.info("Starting Coin Price Bot service...")
     logger.info(f"ODYN API endpoint: {ODYN_API}")
-    logger.info(f"Chat-bot TEE endpoint: {CHAT_BOT_ENDPOINT}")
+    logger.info(f"Chat-bot TEE endpoint: {get_chat_bot_endpoint()}")
     logger.info("Endpoints:")
     logger.info("  GET  /             - Health check")
     logger.info("  GET  /ping         - Ping/pong")
