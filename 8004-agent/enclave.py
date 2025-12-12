@@ -17,11 +17,14 @@ from cryptography.hazmat.backends import default_backend
 
 
 class Enclave:
-    """Wrapper for enclaver's odyn API."""
+    """Wrapper for enclaver's odyn API with encryption support."""
     
     def __init__(self, endpoint: str = "http://127.0.0.1:18000"):
         """
         Initialize the Enclave helper.
+        
+        Generates a P-384 keypair for encryption/decryption operations.
+        The keypair is used for ECDH key exchange with clients.
         
         Args:
             endpoint: The odyn API endpoint. Defaults to localhost:18000.
@@ -29,6 +32,7 @@ class Enclave:
         self.endpoint = endpoint
         
         # Generate P-384 keypair for encryption (separate from ETH signing key)
+        # This key is used for ECDH key exchange with clients
         self._encryption_private_key = ec.generate_private_key(ec.SECP384R1(), default_backend())
         self._encryption_public_key = self._encryption_private_key.public_key()
     
@@ -152,6 +156,19 @@ class Enclave:
         res.raise_for_status()
         return res.json()["public_key"]
     
+    def get_public_key_der(self) -> bytes:
+        """
+        Get the public key from the enclave in DER format.
+        
+        Returns:
+            The public key as DER-encoded bytes.
+        """
+        pub_key_hex = self.get_public_key()
+        # Remove 0x prefix if present
+        if pub_key_hex.startswith("0x"):
+            pub_key_hex = pub_key_hex[2:]
+        return bytes.fromhex(pub_key_hex)
+    
     def _derive_shared_key(self, peer_public_key_der: bytes) -> bytes:
         """
         Derive a shared AES key using ECDH + HKDF.
@@ -179,13 +196,6 @@ class Enclave:
         """
         Decrypt data encrypted by a client using ECDH.
         
-        The client should:
-        1. Generate an ephemeral P-384 keypair
-        2. Get server's public key from /get_encryption_key
-        3. Derive shared key using ECDH + HKDF(SHA256, info="encryption data")
-        4. Encrypt data with AES-256-GCM using a random 32-byte nonce
-        5. Send: nonce (hex), client public key (DER hex), encrypted data (hex)
-        
         Args:
             nonce_hex: 32-byte nonce in hex
             client_public_key_hex: Client's ephemeral public key (DER format, hex)
@@ -206,6 +216,38 @@ class Enclave:
         plaintext = aesgcm.decrypt(nonce, encrypted_data, None)
         
         return plaintext.decode('utf-8')
+    
+    def encrypt_data(self, data: str, client_public_key_der: bytes) -> Tuple[str, str, str]:
+        """
+        Encrypt data to send back to the client.
+        
+        Args:
+            data: Plaintext string to encrypt
+            client_public_key_der: Client's public key in DER format
+            
+        Returns:
+            Tuple of (encrypted data hex, our public key hex, response nonce hex)
+        """
+        # Derive shared key
+        aes_key = self._derive_shared_key(client_public_key_der)
+        
+        # Encode data
+        plaintext = data.encode('utf-8')
+        
+        # Generate new nonce for response
+        response_nonce = self.get_random_bytes(32)
+        
+        # Encrypt using AES-GCM
+        aesgcm = AESGCM(aes_key)
+        ciphertext = aesgcm.encrypt(response_nonce, plaintext, None)
+        
+        # Get our public key in DER format (same as in attestation)
+        our_public_key_der = self._encryption_public_key.public_bytes(
+            encoding=serialization.Encoding.DER,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo
+        )
+        
+        return ciphertext.hex(), our_public_key_der.hex(), response_nonce.hex()
 
 
 if __name__ == '__main__':

@@ -137,9 +137,10 @@ def talk():
             # Decrypt the request
             logger.info("Decrypting incoming request...")
             try:
-                data = enclave.decrypt_request(
+                decrypted_str = enclave.decrypt_data(
                     nonce_hex, client_public_key_hex, encrypted_data_hex
                 )
+                data = json.loads(decrypted_str)
             except Exception as e:
                 logger.error(f"Decryption failed: {e}")
                 return jsonify({"error": f"Decryption failed: {str(e)}"}), 400
@@ -231,8 +232,9 @@ def talk():
         if is_encrypted:
             # Encrypt the response
             logger.info("Encrypting response...")
-            encrypted_response, server_public_key_hex, response_nonce_hex = enclave.encrypt_response(
-                req_resp_pairs, client_public_key_der
+            response_json = json.dumps(req_resp_pairs, sort_keys=True, separators=(',', ':'))
+            encrypted_response, server_public_key_hex, response_nonce_hex = enclave.encrypt_data(
+                response_json, client_public_key_der
             )
             
             encrypted_envelope = {

@@ -6,7 +6,6 @@ inside the enclave environment.
 """
 
 import json
-import hashlib
 import requests
 from typing import Dict, Any, Optional, Tuple
 
@@ -48,18 +47,22 @@ class Enclave:
         res.raise_for_status()
         return res.json()["address"]
     
-    def get_attestation(self) -> str:
+    def get_attestation(self, user_data: Optional[Dict[str, Any]] = None) -> str:
         """
         Get the attestation document from the enclave.
-        
-        The attestation includes the P-384 encryption public key that clients
-        should use for encrypting requests.
         
         The odyn API returns CBOR-encoded attestation document as binary data.
         We base64-encode it for JSON transport.
         
+        Args:
+            user_data: Optional dict with custom fields to embed in attestation.
+                The enclave will automatically add 'eth_addr' to this dict.
+                If None, the attestation will contain only {"eth_addr": "0x..."}.
+
         Returns:
             Base64-encoded CBOR attestation document string.
+            The user_data field in the attestation will be a JSON dict
+            containing eth_addr and any custom fields provided.
         """
         import base64
         
@@ -69,12 +72,18 @@ class Enclave:
             format=serialization.PublicFormat.SubjectPublicKeyInfo
         ).decode('utf-8')
         
+        payload = {
+            "nonce": "",
+            "public_key": encryption_pub_key_pem,
+        }
+        
+        # If user_data dict is provided, include it (enclave will add eth_addr)
+        if user_data is not None:
+            payload["user_data"] = user_data
+        
         res = requests.post(
             f"{self.endpoint}/v1/attestation",
-            json={
-                "nonce": "",
-                "public_key": encryption_pub_key_pem
-            },
+            json=payload,
             timeout=10
         )
         res.raise_for_status()
@@ -114,36 +123,27 @@ class Enclave:
         return bytes.fromhex(random_hex)[:count]
     
     def sign_message(self, data: Dict[str, Any]) -> str:
-        """
-        Sign a message using the enclave's key.
-        
-        The data is JSON-encoded and then signed. Returns the signature as hex.
-        
-        Args:
-            data: Dictionary to sign.
-            
-        Returns:
-            Hex-encoded signature.
-        """
-        # Serialize data to JSON for signing
+        """Sign a dict payload by canonical JSON then /v1/eth/sign (EIP-191 prefix inside enclaver)."""
         message = json.dumps(data, sort_keys=True, separators=(',', ':'))
-        message_bytes = message.encode('utf-8')
-        
-        # Create a hash of the message
-        message_hash = hashlib.sha256(message_bytes).hexdigest()
-        
-        # Sign using the enclave's key (odyn expects 'message_hash' field)
+        return self.sign_data(message)
+
+    def sign_data(self, data: str) -> str:
+        """
+        Sign plain text data using enclaver's /v1/eth/sign (EIP-191 inside enclaver).
+        Returns hex signature without 0x prefix for verifier compatibility.
+        """
         res = requests.post(
             f"{self.endpoint}/v1/eth/sign",
             json={
-                "message_hash": f"0x{message_hash}",
+                "message": data,
                 "include_attestation": False
             },
             headers={"Content-Type": "application/json"},
             timeout=10
         )
         res.raise_for_status()
-        return res.json()["signature"]
+        sig = res.json()["signature"]
+        return sig[2:] if sig.startswith("0x") else sig
     
     def get_public_key(self) -> str:
         """
@@ -169,13 +169,11 @@ class Enclave:
             pub_key_hex = pub_key_hex[2:]
         return bytes.fromhex(pub_key_hex)
     
-    def _derive_shared_key(self, private_key: ec.EllipticCurvePrivateKey, 
-                           peer_public_key_der: bytes) -> bytes:
+    def _derive_shared_key(self, peer_public_key_der: bytes) -> bytes:
         """
         Derive a shared AES key using ECDH + HKDF.
         
         Args:
-            private_key: Our private key for ECDH
             peer_public_key_der: Peer's public key in DER format
             
         Returns:
@@ -184,7 +182,7 @@ class Enclave:
         peer_public_key = serialization.load_der_public_key(
             peer_public_key_der, backend=default_backend()
         )
-        shared_key = private_key.exchange(ec.ECDH(), peer_public_key)
+        shared_key = self._encryption_private_key.exchange(ec.ECDH(), peer_public_key)
         aes_key = HKDF(
             algorithm=hashes.SHA256(),
             length=32,
@@ -193,64 +191,48 @@ class Enclave:
         ).derive(shared_key)
         return aes_key
     
-    def decrypt_request(self, nonce_hex: str, client_public_key_hex: str, 
-                        encrypted_data_hex: str) -> Dict[str, Any]:
+    def decrypt_data(self, nonce_hex: str, client_public_key_hex: str, 
+                     encrypted_data_hex: str) -> str:
         """
-        Decrypt an incoming encrypted request.
-        
-        The request contains:
-        - nonce: Hex-encoded 32-byte nonce
-        - public_key: Client's DER-encoded public key (hex)
-        - data: Encrypted data (hex)
-        
-        The client encrypted the data using ECDH with our P-384 public key
-        (from attestation) and their private key.
+        Decrypt data encrypted by a client using ECDH.
         
         Args:
-            nonce_hex: Hex-encoded nonce
-            client_public_key_hex: Client's public key in hex (DER format)
-            encrypted_data_hex: Encrypted data in hex
+            nonce_hex: 32-byte nonce in hex
+            client_public_key_hex: Client's ephemeral public key (DER format, hex)
+            encrypted_data_hex: AES-GCM encrypted data (hex)
             
         Returns:
-            Decrypted data as a dictionary
+            Decrypted plaintext string
         """
         nonce = bytes.fromhex(nonce_hex)
         client_public_key_der = bytes.fromhex(client_public_key_hex)
         encrypted_data = bytes.fromhex(encrypted_data_hex)
         
-        # Use our stored encryption private key for ECDH
-        # This corresponds to the public key in the attestation
-        aes_key = self._derive_shared_key(self._encryption_private_key, client_public_key_der)
+        # Derive shared key
+        aes_key = self._derive_shared_key(client_public_key_der)
         
         # Decrypt using AES-GCM
         aesgcm = AESGCM(aes_key)
         plaintext = aesgcm.decrypt(nonce, encrypted_data, None)
         
-        # Parse JSON
-        data = json.loads(plaintext.decode('utf-8'))
-        
-        return data
+        return plaintext.decode('utf-8')
     
-    def encrypt_response(self, data: Dict[str, Any], 
-                         client_public_key_der: bytes) -> Tuple[str, str, str]:
+    def encrypt_data(self, data: str, client_public_key_der: bytes) -> Tuple[str, str, str]:
         """
-        Encrypt a response to send back to the client.
-        
-        Uses the same ECDH shared key derivation as decryption, so the client
-        can decrypt using their private key and our public key (from attestation).
+        Encrypt data to send back to the client.
         
         Args:
-            data: Response data to encrypt
+            data: Plaintext string to encrypt
             client_public_key_der: Client's public key in DER format
             
         Returns:
             Tuple of (encrypted data hex, our public key hex, response nonce hex)
         """
-        # Derive shared key using our stored encryption private key
-        aes_key = self._derive_shared_key(self._encryption_private_key, client_public_key_der)
+        # Derive shared key
+        aes_key = self._derive_shared_key(client_public_key_der)
         
-        # Serialize data to JSON
-        plaintext = json.dumps(data, sort_keys=True, separators=(',', ':')).encode('utf-8')
+        # Encode data
+        plaintext = data.encode('utf-8')
         
         # Generate new nonce for response
         response_nonce = self.get_random_bytes(32)
