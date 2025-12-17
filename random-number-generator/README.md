@@ -83,7 +83,7 @@ REGISTRY_ADDRESS=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 \
   npx hardhat run scripts/set-registry.js --network localhost
 
 # Register a TEE wallet as operator
-TEE_WALLET_ADDRESS=0x50a1c7EaA1CC0e0a8D3a02681C87b6A3C75f80d8 \
+TEE_WALLET_ADDRESS=0x9c961618782BC106d5DFF45046D8760E8524C3A8 \
   npx hardhat run scripts/register-tee-wallet.js --network localhost
 ```
 
