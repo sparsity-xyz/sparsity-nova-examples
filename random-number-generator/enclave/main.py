@@ -1,3 +1,4 @@
+import os
 import asyncio
 import logging
 import random
@@ -9,6 +10,7 @@ from web3 import Web3
 from web3.contract import Contract
 from fastapi import FastAPI, HTTPException
 from fastapi.requests import Request
+from fastapi.staticfiles import StaticFiles
 
 from config import Config
 from enclave import Enclave
@@ -66,6 +68,16 @@ class RandomNumberGenerator:
             description="Off-chain service for generating and fulfilling random numbers",
             version="1.0.0"
         )
+
+        # Mount consumer frontend
+        self.consumer_mounted = False
+        consumer_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "consumer-frontend"))
+        if os.path.exists(consumer_path):
+            self.app.mount("/consumer", StaticFiles(directory=consumer_path, html=True), name="consumer")
+            logging.info(f"✅ Mounted consumer frontend at /consumer from {consumer_path}")
+            self.consumer_mounted = True
+        else:
+            logging.warning(f"⚠️ Consumer frontend path not found: {consumer_path}")
         self.init_router()
 
     def init_router(self):
@@ -84,7 +96,8 @@ class RandomNumberGenerator:
             "operator": self.operator_address,
             "operator_balance": round(self.w3.eth.get_balance(self.operator_address) / 1e18, 6),
             "processed_requests": len(self.processed_requests),
-            "explorer": f"https://sepolia.basescan.org/address/{self.contract_address}"
+            "explorer": f"https://sepolia.basescan.org/address/{self.contract_address}",
+            "consumer": f"{req.base_url}consumer" if self.consumer_mounted else None,
         }
 
     async def request_info(self, request_id):
