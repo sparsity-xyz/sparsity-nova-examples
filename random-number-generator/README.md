@@ -1,6 +1,6 @@
 # Random Number Generator
 
-A demo application showing how a true random number generator runs on the Sparsity Nova Platform using TEE (Trusted Execution Environment).
+The Random Number Generator (RNG) is a demo application that leverages the Sparsity Nova Platform's Trusted Execution Environment (TEE) alongside an on-chain smart contract to provide secure and verifiable randomness. Users submit requests to the smart contract, which emits events that are processed by the TEE-protected enclave to generate tamper-proof random numbers. This architecture ensures that the entire lifecycle—from request to on-chain fulfillment—is transparent and resistant to manipulation, enabling developers to build truly trustless applications.
 
 ## Architecture
 
