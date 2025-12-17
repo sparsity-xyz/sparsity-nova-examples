@@ -91,6 +91,8 @@ TEE_WALLET_ADDRESS=0x50a1c7EaA1CC0e0a8D3a02681C87b6A3C75f80d8 \
 
 ```bash
 cd enclave
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 python main.py
 ```

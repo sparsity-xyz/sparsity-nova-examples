@@ -61,14 +61,14 @@ async function main() {
   const artifactPath = path.join(__dirname, "../artifacts/contracts/RandomNumberGenerator.sol/RandomNumberGenerator.json");
   const artifact = JSON.parse(fs.readFileSync(artifactPath, "utf8"));
 
-  const rngBackendDir = path.join(__dirname, "../../backend");
+  const rngBackendDir = path.join(__dirname, "../../enclave");
   if (!fs.existsSync(rngBackendDir)) {
     fs.mkdirSync(rngBackendDir, { recursive: true });
   }
 
   const abiPath = path.join(rngBackendDir, "abi.json");
   fs.writeFileSync(abiPath, JSON.stringify(artifact.abi, null, 2));
-  console.log("📋 ABI exported to rng-backend/rng-abi.json");
+  console.log("📋 ABI exported to rng-enclave/abi.json");
 
   // Update backend config
   updateBackendConfig(rngAddress, hre.network.name);
@@ -105,7 +105,7 @@ function getExplorerUrl(network, address) {
 }
 
 function updateBackendConfig(contractAddress, network) {
-  const configPath = path.join(__dirname, "../../backend/config.py");
+  const configPath = path.join(__dirname, "../../enclave/config.py");
   let config = fs.readFileSync(configPath, "utf8");
 
   // Update contract address
@@ -130,7 +130,7 @@ function updateBackendConfig(contractAddress, network) {
   }
 
   fs.writeFileSync(configPath, config);
-  console.log("⚙️  Backend config.py updated");
+  console.log("⚙️  Enclave config.py updated");
 }
 
 main()

@@ -5,9 +5,9 @@ from pathlib import Path
 
 class Config:
     RPC_URL = "https://base-sepolia-public.nodies.app"
-    CONTRACT_ADDRESS = "0x7eAA444e7257Aa4A5Ed74793991AAa0767939075"
+    CONTRACT_ADDRESS = "0x5a5De497725Da2751F743a0cC922cB8F91811c28"
 
-    MOCK_ENCLAVER_ENDPOINT = "http://54.215.216.173:18000"
+    MOCK_ENCLAVER_ENDPOINT = "http://3.101.68.206:18000"
     ENCLAVER_ENDPOINT = "http://127.0.0.1:18000" \
         if os.getenv("IN_DOCKER", "False").lower() == "true" \
         else MOCK_ENCLAVER_ENDPOINT
