@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -7,6 +8,7 @@
     <link rel="stylesheet" href="styles.css">
     <script src="https://cdn.ethers.io/lib/ethers-5.7.umd.min.js"></script>
 </head>
+
 <body>
     <div class="container">
         <!-- Header -->
@@ -34,8 +36,8 @@
                 <h2>⚙️ Configuration</h2>
                 <div class="form-group">
                     <label for="rngAddress">RNG Contract Address</label>
-                    <input type="text" id="rngAddress" placeholder="0x..." 
-                           value="">
+                    <input type="text" id="rngAddress" placeholder="0x..."
+                        value="0x5a5De497725Da2751F743a0cC922cB8F91811c28">
                 </div>
                 <div class="mode-selector">
                     <label>Request Mode</label>
@@ -54,7 +56,8 @@
                 </div>
                 <div id="consumerAddressGroup" class="form-group hidden">
                     <label for="consumerAddress">Consumer Contract Address</label>
-                    <input type="text" id="consumerAddress" placeholder="0x... (RNGConsumer contract)">
+                    <input type="text" id="consumerAddress" placeholder="0x... (RNGConsumer contract)"
+                        value="0x22Db9cb7AA933bc5a27cf0f4a6d7b8d5451328A5">
                     <small>Deploy RNGConsumer contract first for callback mode</small>
                 </div>
             </section>
@@ -109,4 +112,5 @@
     <script src="abi.js"></script>
     <script src="app.js"></script>
 </body>
+
 </html>
