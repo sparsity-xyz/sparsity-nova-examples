@@ -1,5 +1,7 @@
 import asyncio
 import logging
+import random
+import requests
 from typing import List, Optional
 
 import uvicorn
@@ -119,6 +121,68 @@ class RandomNumberGenerator:
         except Exception:
             return self.w3.to_wei(2, 'gwei')
 
+    @staticmethod
+    def tx_to_payload(tx: dict) -> dict:
+        """Convert web3.py transaction dict to enclaver payload format."""
+        return {
+            "kind": "structured",
+            "chain_id": hex(tx["chainId"]),
+            "nonce": hex(tx["nonce"]),
+            "max_priority_fee_per_gas": hex(tx["maxPriorityFeePerGas"]),
+            "max_fee_per_gas": hex(tx["maxFeePerGas"]),
+            "gas_limit": hex(tx["gas"]),
+            "to": Web3.to_checksum_address(tx["to"]),
+            "value": hex(tx.get("value", 0)),
+            "data": tx["data"],
+        }
+
+    def sign_tx(self, transaction_dict: dict) -> str:
+        """
+        Sign transaction using enclaver's /v1/eth/sign-tx endpoint.
+        
+        Args:
+            transaction_dict: Transaction dictionary with web3.py format
+            
+        Returns:
+            Signed raw transaction hex string
+        """
+        res = requests.post(
+            f"{self.enclaver.endpoint}/v1/eth/sign-tx",
+            json={
+                "payload": self.tx_to_payload(transaction_dict),
+                "include_attestation": False
+            },
+            timeout=10
+        )
+        res.raise_for_status()
+        return res.json()["raw_transaction"]
+
+    def generate_random_numbers(self, min_val: int, max_val: int, count: int) -> List[int]:
+        """
+        Generate cryptographically secure random numbers using enclave's random source.
+
+        Args:
+            min_val: Minimum value (inclusive)
+            max_val: Maximum value (exclusive)
+            count: Number of random numbers
+
+        Returns:
+            List of random numbers
+        """
+        # Get random seed from enclave
+        seed = self.enclaver.get_random_bytes(32)
+        random.seed(seed)
+        
+        random_numbers = []
+        range_size = max_val - min_val
+
+        for _ in range(count):
+            # [min, max)
+            random_num = min_val + random.randint(0, range_size - 1)
+            random_numbers.append(random_num)
+
+        return random_numbers
+
     async def fulfill_random_number(
             self,
             request_id: int,
@@ -166,8 +230,8 @@ class RandomNumberGenerator:
                 "chainId": self.chain_id,
             })
 
-            # Sign transaction
-            signed_txn = self.enclaver.sign_tx(transaction)
+            # Sign transaction using local helper (calls enclaver endpoint)
+            signed_txn = self.sign_tx(transaction)
 
             # Send transaction
             tx_hash = self.w3.eth.send_raw_transaction(signed_txn)
@@ -233,10 +297,8 @@ class RandomNumberGenerator:
             logging.error(f"❌ Error checking request status: {e}")
             return
 
-        # set seed first
-        self.enclaver.set_random_seed()
-        # Generate random numbers
-        random_numbers = self.enclaver.generate_random_numbers(min_val, max_val, count)
+        # Generate random numbers using enclave's secure random source
+        random_numbers = self.generate_random_numbers(min_val, max_val, count)
         # Fulfill to contract
         try:
             tx_hash = await self.fulfill_random_number(request_id, random_numbers)

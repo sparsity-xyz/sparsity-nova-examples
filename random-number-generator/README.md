@@ -1,113 +1,192 @@
+# Random Number Generator
 
-# rng demo
-This is a demo showing how a random number generator runs on the Sparsity Nova Platform.
+A demo application showing how a true random number generator runs on the Sparsity Nova Platform using TEE (Trusted Execution Environment).
 
-## architecture
+## Architecture
+
 ![](./architecture.png)
 
-### RNG contract
+### Components
+
+#### RNG Contract (`RandomNumberGenerator.sol`)
 A smart contract that provides off-chain assisted true random numbers.
-Users submit random number requests, off-chain operators listen to events, generate randomness, and call back the contract, optionally triggering user-defined callback contracts.
-### Nova platform
+- Users submit random number requests on-chain
+- Implements `ISparsityApp` interface for TEE wallet registration
+- Supports optional callback to user contracts via `IRNGCallback`
+
+#### Nova Platform
 The on-chain registry and management layer of the Nova system.
-It registers TEE wallets, authorizes operators, and coordinates trusted computation flows across the Nova ecosystem.
-#### Backend
-The off-chain service responsible for listening to on-chain events, generating random numbers securely, and fulfilling them by calling the RNG contract.
-#### Enclaver
-It can act as an operator that generates randomness inside the enclave and submits verified results to the blockchain.
-#### UserContract
-A smart contract implemented by the user, which receives random numbers through the callback interface IRNGCallback.
-This allows developers to build lotteries, games, on-chain logic, or autonomous agents that depend on secure randomness.
-## local testing
+- Registers TEE wallets and authorizes operators
+- Coordinates trusted computation flows across the Nova ecosystem
 
-### deploy contract
+#### Enclave Service
+The off-chain TEE service responsible for:
+- Listening to on-chain `RandomNumberRequested` events
+- Generating cryptographically secure random numbers inside the enclave
+- Signing and submitting fulfillment transactions
+
+#### User Contract (Optional)
+A smart contract implemented by the user that receives random numbers through the `IRNGCallback` interface.
+This allows developers to build lotteries, games, or autonomous agents that depend on secure randomness.
+
+## Project Structure
+
 ```
+random-number-generator/
+├── README.md                 # This file
+├── architecture.png          # Architecture diagram
+├── contract/                 # Smart contracts (Hardhat)
+│   ├── contracts/
+│   │   ├── RandomNumberGenerator.sol   # Main RNG contract
+│   │   ├── ISparsityApp.sol            # Nova platform interface
+│   │   └── TESTRNGCallback.sol         # Example callback contract
+│   ├── scripts/              # Deployment scripts
+│   ├── test/                 # Contract tests
+│   ├── hardhat.config.js
+│   └── package.json
+└── enclave/                  # TEE enclave service
+    ├── main.py               # FastAPI service entry point
+    ├── enclave.py            # Enclave API wrapper
+    ├── config.py             # Configuration
+    ├── abi.json              # Contract ABI
+    ├── requirements.txt      # Python dependencies
+    ├── Dockerfile            # Container build
+    └── README.md             # Enclave service docs
+```
+
+## Local Testing
+
+### 1. Deploy Contract
+
+```bash
 cd contract
-```
-
-install requirements
-```
 npm install
 ```
-start local node
-```
+
+Start local node:
+```bash
 npx hardhat node
 ```
-deploy contract
-```
+
+Deploy contract (in another terminal):
+```bash
 npm run deploy:local
-``` 
-To set up a mock TEE wallet for local testing, we provide a mock TEE service to support local development.
-
-```
-REGISTRY_ADDRESS=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 npx hardhat run scripts/set-registry.js --network localhost
-
-TEE_WALLET_ADDRESS=0x50a1c7EaA1CC0e0a8D3a02681C87b6A3C75f80d8 npx hardhat run scripts/register-tee-wallet.js --network localhost
 ```
 
-### start backend
+### 2. Configure Mock TEE Wallet
+
+To set up a mock TEE wallet for local testing:
+
+```bash
+# Set the registry address (use any account for local testing)
+REGISTRY_ADDRESS=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 \
+  npx hardhat run scripts/set-registry.js --network localhost
+
+# Register a TEE wallet as operator
+TEE_WALLET_ADDRESS=0x50a1c7EaA1CC0e0a8D3a02681C87b6A3C75f80d8 \
+  npx hardhat run scripts/register-tee-wallet.js --network localhost
 ```
-cd backend
-```
-start service
-```
+
+### 3. Start Enclave Service
+
+```bash
+cd enclave
+pip install -r requirements.txt
 python main.py
 ```
 
-### testing
-```
+The service will start on `http://localhost:8000`.
+
+### 4. Test Random Number Generation
+
+```bash
 cd contract
-```
-run test script to generate random number requests
-```
+
+# Generate random number requests
 npm run test:local
-```
-then the backend will detect the requests and fulfill the data,
-you can also check the results by running
-```
+
+# Check results
 npm run check:local
 ```
 
-## deploy on Sparsity Nova Platform
-### contract
-```
+The enclave service will automatically detect requests and fulfill them with random numbers.
+
+## Deploy on Sparsity Nova Platform
+
+### 1. Deploy Contract to Base Sepolia
+
+```bash
 cd contract
-```
-set up environment variables
-```
 cp .env.example .env
+# Edit .env with your DEPLOYMENT_PRIVATE_KEY
 ```
-deploy contract, When the contract is deployed, the on-chain contract address will be automatically injected into backend/config.py. 
-```
+
+Deploy:
+```bash
 npm run deploy:sepolia
 ```
-verify contract
-```
-npx hardhat verify --network baseSepolia <YOUR_CONTRACT_ADDRESS> <REGISTRY_CONTRACT>
+
+Verify contract:
+```bash
+npx hardhat verify --network baseSepolia <CONTRACT_ADDRESS> <REGISTRY_CONTRACT>
 ```
 
-### go to Sparsity Nova Platform
-```
-https://nova.sparsity.ai/
-```
-create a new app and deploy
+### 2. Deploy on Nova Platform
 
-### get address inside service
-after the app was registered onchain, fund the wallet inside TEE
-```
+1. Go to [https://nova.sparsity.ai/](https://nova.sparsity.ai/)
+2. Create a new app with the enclave service
+3. Deploy and wait for registration
+
+### 3. Get TEE Wallet Address
+
+After the app is registered on-chain:
+
+```bash
 curl <APP_ENDPOINT>
 ```
-the output should be
-```
+
+Response:
+```json
 {
     "service": "Random Number Generator",
     "version": "1.0.0",
     "status": "running",
     "is_operator": true,
-    "contract_address": "0xB7f8BC63BbcaD18155201308C8f3540b07f84F5e",
-    "operator": "0xAae4260D8b9AE1D2D6fBC07FCE0D9a46852c5984",
+    "contract_address": "0x...",
+    "operator": "0x...",
     "operator_balance": 0.998857,
     "processed_requests": 0
 }
 ```
-fund `operator`
+
+### 4. Fund the Operator
+
+Fund the `operator` address shown above with ETH on Base Sepolia so it can submit fulfillment transactions.
+
+## API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/` | GET | Service status and info |
+| `/request/{request_id}` | GET | Get request details |
+| `/attestation` | GET | Get TEE attestation document |
+
+## Environment Variables
+
+### Contract (.env)
+```
+DEPLOYMENT_PRIVATE_KEY=0x...
+BASE_SEPOLIA_RPC=https://sepolia.base.org
+BASESCAN_API_KEY=...
+```
+
+### Enclave (config.py)
+```python
+CONTRACT_ADDRESS = "0x..."
+RPC_URL = "https://sepolia.base.org"
+ENCLAVER_ENDPOINT = "http://127.0.0.1:18000"
+```
+
+## License
+
+Apache-2.0

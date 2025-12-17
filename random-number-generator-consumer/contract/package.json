@@ -1,0 +1,17 @@
+{
+    "name": "rng-consumer-contract",
+    "version": "1.0.0",
+    "description": "Random Number Generator Consumer Contract",
+    "scripts": {
+        "compile": "hardhat compile",
+        "deploy:local": "hardhat run scripts/deploy.js --network localhost",
+        "deploy:sepolia": "hardhat run scripts/deploy.js --network baseSepolia",
+        "verify": "hardhat verify --network baseSepolia"
+    },
+    "devDependencies": {
+        "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+        "@openzeppelin/contracts": "^5.0.0",
+        "dotenv": "^16.3.1",
+        "hardhat": "^2.22.0"
+    }
+}

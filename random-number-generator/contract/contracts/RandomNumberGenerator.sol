@@ -2,7 +2,7 @@
 pragma solidity ^0.8.30;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
-import "./INovaAPP.sol";
+import "./ISparsityApp.sol";
 
 /// @title RNG Callback Interface
 /// @notice User contracts need to implement this interface to receive random number callbacks
@@ -20,8 +20,7 @@ interface IRNGCallback {
 /// @author chuwt
 /// @notice Off-chain true random number generator (with callback support)
 /// @dev User request → Emit event → Off-chain generation → Callback on-chain → Callback user contract
-contract RandomNumberGenerator is Ownable, INovaAPP {
-
+contract RandomNumberGenerator is Ownable, ISparsityApp {
     // ========== State Variables ==========
     // Nova registry
     address public novaRegistryAddress;
@@ -34,23 +33,23 @@ contract RandomNumberGenerator is Ownable, INovaAPP {
 
     // Request status
     enum RequestStatus {
-        Pending,    // Waiting
-        Fulfilled,  // Completed
-        Cancelled   // Cancelled
+        Pending, // Waiting
+        Fulfilled, // Completed
+        Cancelled // Cancelled
     }
 
     // Random number request
     struct RandomRequest {
-        address requester;      // Requester
-        uint256 timestamp;      // Request time
-        uint256 min;           // Minimum value
-        uint256 max;           // Maximum value
-        uint256 count;         // Count
-        RequestStatus status;  // Status
+        address requester; // Requester
+        uint256 timestamp; // Request time
+        uint256 min; // Minimum value
+        uint256 max; // Maximum value
+        uint256 count; // Count
+        RequestStatus status; // Status
         uint256[] randomNumbers; // Result (filled after completion)
-        uint256 fulfilledAt;   // Completion time
+        uint256 fulfilledAt; // Completion time
         address callbackContract; // Callback contract address (if any)
-        bool callbackExecuted;    // Whether callback has been executed
+        bool callbackExecuted; // Whether callback has been executed
     }
 
     // requestId => RandomRequest
@@ -213,7 +212,9 @@ contract RandomNumberGenerator is Ownable, INovaAPP {
 
     /// @notice Query request status
     /// @param requestId Request ID
-    function getRequest(uint256 requestId)
+    function getRequest(
+        uint256 requestId
+    )
         external
         view
         returns (
@@ -247,11 +248,9 @@ contract RandomNumberGenerator is Ownable, INovaAPP {
     /// @notice Get all requests from a user
     /// @param user User address
     /// @return requestIds Array of request IDs
-    function getUserRequests(address user)
-        external
-        view
-        returns (uint256[] memory)
-    {
+    function getUserRequests(
+        address user
+    ) external view returns (uint256[] memory) {
         return userRequests[user];
     }
 
@@ -316,10 +315,11 @@ contract RandomNumberGenerator is Ownable, INovaAPP {
         RandomRequest storage req = requests[requestId];
         req.callbackExecuted = true;
 
-        try IRNGCallback(callbackContract).onRandomNumberFulfilled{gas: callbackGasLimit}(
-            requestId,
-            randomNumbers
-        ) {
+        try
+            IRNGCallback(callbackContract).onRandomNumberFulfilled{
+                gas: callbackGasLimit
+            }(requestId, randomNumbers)
+        {
             emit CallbackExecuted(requestId, callbackContract, true, "");
         } catch Error(string memory reason) {
             emit CallbackExecuted(

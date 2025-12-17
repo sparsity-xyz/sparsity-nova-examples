@@ -10,14 +10,7 @@ typechain-types/
 .env.local
 
 # Deployment files
-rng-deployment.json
-operator-info.json
-
-# Python
-rng-backend/__pycache__/
-rng-backend/*.pyc
-rng-backend/venv/
-rng-backend/env/
+deployment.json
 
 # IDE
 .vscode/
