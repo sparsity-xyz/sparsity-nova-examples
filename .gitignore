@@ -1,2 +1,11 @@
 random-number-generator/enclave/.venv
 random-number-generator/enclave/__pycache__
+new-chat-bot/enclave/.venv
+new-chat-bot/enclave/__pycache__
+new-chat-bot/enclave/ai_models/__pycache__
+new-chat-bot/frontend/node_modules
+new-chat-bot/frontend/.next
+new-chat-bot/frontend/out
+
+
+
