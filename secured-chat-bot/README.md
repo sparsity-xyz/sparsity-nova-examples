@@ -19,6 +19,24 @@ flowchart LR
     Crypto <-->|"E2E Encrypted"| API
 ```
 
+## Encryption Flow
+
+```mermaid
+sequenceDiagram
+    participant F as Frontend
+    participant E as Enclave
+    
+    F->>E: POST /.well-known/attestation
+    E-->>F: public_key + attestation_doc
+    Note over F: Generate P-384 keypair<br/>Derive shared secret (ECDH)
+    F->>E: POST /set-api-key (encrypted)
+    F->>E: POST /talk (encrypted)
+    E-->>F: Encrypted response + signature
+```
+
+**Crypto specs:** P-384 ECDH → HKDF-SHA256 → AES-256-GCM (32-byte nonce)
+
+
 ## Features
 
 | Feature | Description |
@@ -114,22 +132,6 @@ cp -r out ../enclave/frontend
 
 The built frontend is served at `/frontend` by the enclave.
 
-## Encryption Flow
-
-```mermaid
-sequenceDiagram
-    participant F as Frontend
-    participant E as Enclave
-    
-    F->>E: POST /.well-known/attestation
-    E-->>F: public_key + attestation_doc
-    Note over F: Generate P-384 keypair<br/>Derive shared secret (ECDH)
-    F->>E: POST /set-api-key (encrypted)
-    F->>E: POST /talk (encrypted)
-    E-->>F: Encrypted response + signature
-```
-
-**Crypto specs:** P-384 ECDH → HKDF-SHA256 → AES-256-GCM (32-byte nonce)
 
 ## Project Structure
 
