@@ -8,11 +8,8 @@ interface ApiKeyInputProps {
     onApiKeySet: () => void;
 }
 
-const PLATFORMS = [
-    { id: 'openai', name: 'OpenAI' },
-    { id: 'anthropic', name: 'Anthropic' },
-    { id: 'gemini', name: 'Google Gemini' },
-];
+// Only support OpenAI
+const DEFAULT_PLATFORM = 'openai';
 
 export default function ApiKeyInput({ isConnected, onApiKeySet }: ApiKeyInputProps) {
     const [apiKey, setApiKey] = useState('');
@@ -38,7 +35,7 @@ export default function ApiKeyInput({ isConnected, onApiKeySet }: ApiKeyInputPro
 
             if (health.api_key_available) {
                 setIsSet(true);
-                setCachedPlatform((health as any).cached_platform || 'openai');
+                setCachedPlatform((health as any).cached_platform || DEFAULT_PLATFORM);
                 // Start countdown
                 setCountdown(3);
             }
@@ -128,7 +125,7 @@ export default function ApiKeyInput({ isConnected, onApiKeySet }: ApiKeyInputPro
                     </div>
                     {cachedPlatform && (
                         <p className="text-sm text-gray-400">
-                            Platform: <span className="text-white">{PLATFORMS.find(p => p.id === cachedPlatform)?.name || cachedPlatform}</span>
+                            Platform: <span className="text-white">{cachedPlatform === 'openai' ? 'OpenAI' : cachedPlatform}</span>
                         </p>
                     )}
                     {countdown !== null && countdown > 0 && (
@@ -145,24 +142,6 @@ export default function ApiKeyInput({ isConnected, onApiKeySet }: ApiKeyInputPro
                 </div>
             ) : (
                 <div className="space-y-4">
-                    <div>
-                        <label htmlFor="platform" className="block text-sm font-medium text-gray-300 mb-2">
-                            Platform
-                        </label>
-                        <select
-                            id="platform"
-                            value={platform}
-                            onChange={(e) => setPlatform(e.target.value)}
-                            className="w-full px-4 py-3 bg-[#0a0a0a] border border-gray-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-primary"
-                            disabled={isSubmitting}
-                        >
-                            {PLATFORMS.map((p) => (
-                                <option key={p.id} value={p.id}>
-                                    {p.name}
-                                </option>
-                            ))}
-                        </select>
-                    </div>
 
                     <div>
                         <label htmlFor="apiKey" className="block text-sm font-medium text-gray-300 mb-2">

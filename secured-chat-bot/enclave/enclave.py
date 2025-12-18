@@ -9,6 +9,7 @@ import json
 import requests
 from typing import Dict, Any, Optional, Tuple
 
+import os
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives import hashes, serialization
@@ -19,22 +20,21 @@ from cryptography.hazmat.backends import default_backend
 class Enclave:
     """Wrapper for enclaver's odyn API with encryption support."""
     
-    def __init__(self, endpoint: str = "http://127.0.0.1:18000"):
+    DEFAULT_MOCK_ODYN_API = "http://3.101.68.206:18000"
+    
+    def __init__(self, endpoint: Optional[str] = None):
         """
         Initialize the Enclave helper.
         
-        Generates a P-384 keypair for encryption/decryption operations.
-        The keypair is used for ECDH key exchange with clients.
-        
         Args:
-            endpoint: The odyn API endpoint. Defaults to localhost:18000.
+            endpoint: The odyn API endpoint. If None, it automatically chooses
+                between localhost:18000 (in Docker) and the mock API.
         """
-        self.endpoint = endpoint
-        
-        # Generate P-384 keypair for encryption (separate from ETH signing key)
-        # This key is used for ECDH key exchange with clients
-        self._encryption_private_key = ec.generate_private_key(ec.SECP384R1(), default_backend())
-        self._encryption_public_key = self._encryption_private_key.public_key()
+        if endpoint:
+            self.endpoint = endpoint
+        else:
+            is_docker = os.getenv("IN_DOCKER", "False").lower() == "true"
+            self.endpoint = "http://localhost:18000" if is_docker else self.DEFAULT_MOCK_ODYN_API
     
     def eth_address(self) -> str:
         """
@@ -47,39 +47,24 @@ class Enclave:
         res.raise_for_status()
         return res.json()["address"]
     
-    def get_attestation(self, user_data: Optional[Dict[str, Any]] = None) -> str:
+    def get_attestation(self) -> bytes:
         """
-        Get the attestation document from the enclave.
+        Get the attestation document as raw CBOR binary.
         
-        The odyn API returns CBOR-encoded attestation document as binary data.
-        We base64-encode it for JSON transport.
+        This method returns the raw CBOR attestation document without base64 encoding,
+        matching the format returned by the enclaver runtime in production.
         
-        Args:
-            user_data: Optional dict with custom fields to embed in attestation.
-                The enclave will automatically add 'eth_addr' to this dict.
-                If None, the attestation will contain only {"eth_addr": "0x..."}.
-
         Returns:
-            Base64-encoded CBOR attestation document string.
-            The user_data field in the attestation will be a JSON dict
-            containing eth_addr and any custom fields provided.
+            Raw CBOR attestation document bytes.
         """
-        import base64
-        
-        # Get the encryption public key in PEM format for attestation
-        encryption_pub_key_pem = self._encryption_public_key.public_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PublicFormat.SubjectPublicKeyInfo
-        ).decode('utf-8')
+        # Get the encryption public key for attestation API
+        encryption_pub_data = self.get_encryption_public_key_data()
+        encryption_pub_key_pem = encryption_pub_data["public_key_pem"]
         
         payload = {
             "nonce": "",
             "public_key": encryption_pub_key_pem,
         }
-        
-        # If user_data dict is provided, include it (enclave will add eth_addr)
-        if user_data is not None:
-            payload["user_data"] = user_data
         
         res = requests.post(
             f"{self.endpoint}/v1/attestation",
@@ -88,21 +73,32 @@ class Enclave:
         )
         res.raise_for_status()
         
-        # Response is CBOR binary, base64 encode it for JSON transport
-        attestation_cbor = res.content
-        return base64.b64encode(attestation_cbor).decode('utf-8')
+        # Return raw CBOR binary
+        return res.content
+    
+    def get_encryption_public_key_data(self) -> Dict[str, str]:
+        """
+        Retrieve the enclave's encryption public key data.
+        
+        Returns:
+            Dict containing 'public_key_der' (hex) and 'public_key_pem'.
+        """
+        res = requests.get(f"{self.endpoint}/v1/encryption/public_key", timeout=10)
+        res.raise_for_status()
+        return res.json()
     
     def get_encryption_public_key_der(self) -> bytes:
         """
         Get the encryption public key in DER format.
         
         Returns:
-            DER-encoded P-384 public key bytes.
+            DER-encoded public key bytes.
         """
-        return self._encryption_public_key.public_bytes(
-            encoding=serialization.Encoding.DER,
-            format=serialization.PublicFormat.SubjectPublicKeyInfo
-        )
+        pub_data = self.get_encryption_public_key_data()
+        pub_key_hex = pub_data["public_key_der"]
+        if pub_key_hex.startswith("0x"):
+            pub_key_hex = pub_key_hex[2:]
+        return bytes.fromhex(pub_key_hex)
     
     def get_random_bytes(self, count: int = 32) -> bytes:
         """
@@ -152,81 +148,42 @@ class Enclave:
             logging.warning(f"Signing failed (dev mode): {e}")
             return ""
     
-    def get_public_key(self) -> str:
-        """
-        Get the public key from the enclave.
         
-        Returns:
-            The public key as a hex string.
-        """
-        res = requests.get(f"{self.endpoint}/v1/public-key", timeout=10)
-        res.raise_for_status()
-        return res.json()["public_key"]
-    
-    def get_public_key_der(self) -> bytes:
-        """
-        Get the public key from the enclave in DER format.
-        
-        Returns:
-            The public key as DER-encoded bytes.
-        """
-        pub_key_hex = self.get_public_key()
-        # Remove 0x prefix if present
-        if pub_key_hex.startswith("0x"):
-            pub_key_hex = pub_key_hex[2:]
-        return bytes.fromhex(pub_key_hex)
-    
-    def _derive_shared_key(self, peer_public_key_der: bytes) -> bytes:
-        """
-        Derive a shared AES key using ECDH + HKDF.
-        
-        Args:
-            peer_public_key_der: Peer's public key in DER format
-            
-        Returns:
-            32-byte AES key
-        """
-        peer_public_key = serialization.load_der_public_key(
-            peer_public_key_der, backend=default_backend()
-        )
-        shared_key = self._encryption_private_key.exchange(ec.ECDH(), peer_public_key)
-        aes_key = HKDF(
-            algorithm=hashes.SHA256(),
-            length=32,
-            salt=None,
-            info=b"encryption data"
-        ).derive(shared_key)
-        return aes_key
-    
     def decrypt_data(self, nonce_hex: str, client_public_key_hex: str, 
                      encrypted_data_hex: str) -> str:
         """
-        Decrypt data encrypted by a client using ECDH.
+        Decrypt data encrypted by a client using Odyn API.
         
         Args:
-            nonce_hex: 32-byte nonce in hex
+            nonce_hex: Nonce in hex
             client_public_key_hex: Client's ephemeral public key (DER format, hex)
             encrypted_data_hex: AES-GCM encrypted data (hex)
             
         Returns:
             Decrypted plaintext string
         """
-        nonce = bytes.fromhex(nonce_hex)
-        client_public_key_der = bytes.fromhex(client_public_key_hex)
-        encrypted_data = bytes.fromhex(encrypted_data_hex)
+        # Use only first 12 bytes of nonce for standard AES-GCM compatibility
+        nonce_bytes = bytes.fromhex(nonce_hex)
+        if len(nonce_bytes) > 12:
+            nonce_hex = nonce_bytes[:12].hex()
+            
+        payload = {
+            "nonce": nonce_hex if nonce_hex.startswith("0x") else f"0x{nonce_hex}",
+            "client_public_key": client_public_key_hex if client_public_key_hex.startswith("0x") else f"0x{client_public_key_hex}",
+            "encrypted_data": encrypted_data_hex if encrypted_data_hex.startswith("0x") else f"0x{encrypted_data_hex}"
+        }
         
-        # Derive shared key
-        aes_key = self._derive_shared_key(client_public_key_der)
-        
-        # Decrypt using AES-GCM
-        aesgcm = AESGCM(aes_key)
-        plaintext = aesgcm.decrypt(nonce, encrypted_data, None)
-        
-        return plaintext.decode('utf-8')
+        res = requests.post(
+            f"{self.endpoint}/v1/encryption/decrypt",
+            json=payload,
+            timeout=10
+        )
+        res.raise_for_status()
+        return res.json()["plaintext"]
     
     def encrypt_data(self, data: str, client_public_key_der: bytes) -> Tuple[str, str, str]:
         """
-        Encrypt data to send back to the client.
+        Encrypt data to send back to the client using Odyn API.
         
         Args:
             data: Plaintext string to encrypt
@@ -235,31 +192,101 @@ class Enclave:
         Returns:
             Tuple of (encrypted data hex, our public key hex, response nonce hex)
         """
-        # Derive shared key
-        aes_key = self._derive_shared_key(client_public_key_der)
+        client_public_key_hex = client_public_key_der.hex()
+        payload = {
+            "plaintext": data,
+            "client_public_key": f"0x{client_public_key_hex}" if not client_public_key_hex.startswith("0x") else client_public_key_hex
+        }
         
-        # Encode data
-        plaintext = data.encode('utf-8')
-        
-        # Generate new nonce for response
-        response_nonce = self.get_random_bytes(32)
-        
-        # Encrypt using AES-GCM
-        aesgcm = AESGCM(aes_key)
-        ciphertext = aesgcm.encrypt(response_nonce, plaintext, None)
-        
-        # Get our public key in DER format (same as in attestation)
-        our_public_key_der = self._encryption_public_key.public_bytes(
-            encoding=serialization.Encoding.DER,
-            format=serialization.PublicFormat.SubjectPublicKeyInfo
+        res = requests.post(
+            f"{self.endpoint}/v1/encryption/encrypt",
+            json=payload,
+            timeout=10
         )
+        res.raise_for_status()
         
-        return ciphertext.hex(), our_public_key_der.hex(), response_nonce.hex()
+        res_json = res.json()
+        encrypted_data = res_json["encrypted_data"]
+        enclave_public_key = res_json["enclave_public_key"]
+        nonce = res_json["nonce"]
+        
+        # Remove 0x prefixes if present for result consistency
+        if encrypted_data.startswith("0x"): encrypted_data = encrypted_data[2:]
+        if enclave_public_key.startswith("0x"): enclave_public_key = enclave_public_key[2:]
+        if nonce.startswith("0x"): nonce = nonce[2:]
+        
+        return encrypted_data, enclave_public_key, nonce
 
 
 if __name__ == '__main__':
     # Test the enclave helper
-    e = Enclave()
-    print(f"Ethereum address: {e.eth_address()}")
-    print(f"Random bytes: {e.get_random_bytes(16).hex()}")
-    print(f"Attestation: {e.get_attestation()}")
+    import binascii
+    
+    # Use the mock endpoint for testing
+    e = Enclave("http://3.101.68.206:18000")
+    
+    print("--- Basic Info ---")
+    addr = e.eth_address()
+    print(f"Ethereum address: {addr}")
+    
+    rand = e.get_random_bytes(16)
+    print(f"Random bytes (16): {rand.hex()}")
+    
+    print("\n--- Encryption Public Key ---")
+    pub_data = e.get_encryption_public_key_data()
+    print(f"Public Key PEM: {pub_data['public_key_pem'][:50]}...")
+    
+    pub_der = e.get_encryption_public_key_der()
+    print(f"Public Key DER (first 20 bytes): {pub_der[:20].hex()}...")
+
+    print("\n--- Attestation ---")
+    att = e.get_attestation()
+    print(f"Attestation length: {len(att)} bytes")
+    
+    print("\n--- Signing ---")
+    test_payload = {"test": "data", "addr": addr}
+    sig = e.sign_message(test_payload)
+    print(f"Payload signature: {sig}")
+
+    print("\n--- Encryption/Decryption ---")
+    # 1. Simulate a client generating a P-384 keypair (using standard cryptography library)
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.backends import default_backend
+    from cryptography.hazmat.primitives import serialization, hashes
+    from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    client_private_key = ec.generate_private_key(ec.SECP384R1(), default_backend())
+    client_public_key_der = client_private_key.public_key().public_bytes(
+        encoding=serialization.Encoding.DER,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo
+    )
+
+    # 2. Test Decryption: Client encrypts for Enclave
+    print("Testing Decryption (Client -> Enclave)...")
+    server_public_key = serialization.load_der_public_key(pub_der, backend=default_backend())
+    shared_secret = client_private_key.exchange(ec.ECDH(), server_public_key)
+    aes_key = HKDF(
+        algorithm=hashes.SHA256(), length=32, salt=None, info=b"encryption data"
+    ).derive(shared_secret)
+    
+    plaintext = "Secret message from client"
+    nonce = e.get_random_bytes(12) 
+    ciphertext = AESGCM(aes_key).encrypt(nonce, plaintext.encode(), None)
+    
+    decrypted = e.decrypt_data(nonce.hex(), client_public_key_der.hex(), ciphertext.hex())
+    print(f"Decrypted by Enclave: {decrypted}")
+    assert plaintext == decrypted
+
+    # 3. Test Encryption: Enclave encrypts for Client
+    print("\nTesting Encryption (Enclave -> Client)...")
+    response_text = "Hello from the Enclave!"
+    enc_data, enc_pub_key, enc_nonce = e.encrypt_data(response_text, client_public_key_der)
+    
+    # Client decrypts using the derived key
+    # IMPORTANT: We use only the first 12 bytes of the nonce for standard AES-GCM
+    client_decrypted = AESGCM(aes_key).decrypt(bytes.fromhex(enc_nonce)[:12], bytes.fromhex(enc_data), None)
+    print(f"Decrypted by Client: {client_decrypted.decode()}")
+    assert response_text == client_decrypted.decode()
+    
+    print("\nAll tests passed successfully!")

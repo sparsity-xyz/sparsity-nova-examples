@@ -21,8 +21,6 @@ from flask_cors import CORS
 
 from enclave import Enclave
 from ai_models.open_ai import OpenAI
-from ai_models.anthropic import Anthropic
-from ai_models.gemini import Gemini
 from ai_models.platform import Platform
 
 # Configure logging
@@ -35,20 +33,12 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 CORS(app)  # Allow all origins
 
-# Default mock odyn API endpoint
-DEFAULT_MOCK_ODYN_API = "http://3.101.68.206:18000"
-
-# Enclaver odyn API endpoint (internal)
-ODYN_API = "http://localhost:18000" if os.getenv("IN_DOCKER", "False").lower() == "true" else DEFAULT_MOCK_ODYN_API
-
 # Initialize enclave helper
-enclave = Enclave(ODYN_API)
+enclave = Enclave()
 
 # Platform mapping
 PLATFORM_MAPPING: Dict[str, type] = {
     "openai": OpenAI,
-    "anthropic": Anthropic,
-    "gemini": Gemini,
 }
 
 # Cached API key (set via encrypted /set-api-key endpoint)
@@ -117,14 +107,22 @@ def serve_frontend(path=''):
 if os.getenv("IN_DOCKER", "False").lower() != "true":
     @app.route('/.well-known/attestation', methods=['POST'])
     def attestation():
-        """Get attestation document from the enclave (local dev only)."""
+        """
+        Get attestation document from the enclave (local dev only).
+        
+        Returns raw CBOR binary matching the production enclaver runtime format.
+        The CBOR contains a COSE Sign1 structure with the attestation document.
+        """
         try:
-            att_doc = enclave.get_attestation()
-            public_key_der = enclave.get_encryption_public_key_der()
-            return jsonify({
-                "attestation_doc": att_doc,
-                "public_key": public_key_der.hex()
-            })
+            # Get raw CBOR attestation (same format as production)
+            attestation_cbor = enclave.get_attestation_raw()
+            
+            # Return raw CBOR with proper content type
+            from flask import Response
+            return Response(
+                attestation_cbor,
+                mimetype='application/cbor'
+            )
         except Exception as e:
             logger.error(f"Attestation error: {e}")
             return jsonify({"error": str(e)}), 500

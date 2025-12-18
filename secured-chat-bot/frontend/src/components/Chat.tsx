@@ -18,23 +18,15 @@ interface ChatProps {
     isReady: boolean;
 }
 
-const AI_MODELS = [
-    { id: 'gpt-5.1', name: 'GPT-5.1' },
-    { id: 'gpt-5', name: 'GPT-5' },
-    { id: 'gpt-5-mini', name: 'GPT-5 Mini' },
-    { id: 'gpt-4.1', name: 'GPT-4.1' },
-    { id: 'gpt-4.1-mini', name: 'GPT-4.1 Mini' },
-    { id: 'gpt-4o', name: 'GPT-4o' },
-    { id: 'gpt-4o-mini', name: 'GPT-4o Mini' },
-    { id: 'gpt-4', name: 'GPT-4' },
-];
+// Default model for OpenAI
+const DEFAULT_MODEL = 'gpt-4o';
 
 export default function Chat({ isReady }: ChatProps) {
     const [messages, setMessages] = useState<Message[]>([]);
     const [input, setInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const [selectedModel, setSelectedModel] = useState('gpt-5.1');
+    const [selectedModel, setSelectedModel] = useState(DEFAULT_MODEL);
     const [expandedSig, setExpandedSig] = useState<number | null>(null);
     const [verificationDialogOpen, setVerificationDialogOpen] = useState(false);
     const [selectedVerificationData, setSelectedVerificationData] = useState<VerificationData | null>(null);
@@ -105,22 +97,6 @@ export default function Chat({ isReady }: ChatProps) {
     return (
         <>
             <div className="flex flex-col h-full">
-                {/* Model Selector */}
-                <div className="flex items-center gap-4 p-4 border-b border-gray-800">
-                    <label className="text-sm text-gray-400">Model:</label>
-                    <select
-                        value={selectedModel}
-                        onChange={(e) => setSelectedModel(e.target.value)}
-                        className="px-3 py-2 bg-[#0a0a0a] border border-gray-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-primary"
-                        disabled={!isReady}
-                    >
-                        {AI_MODELS.map((model) => (
-                            <option key={model.id} value={model.id}>
-                                {model.name}
-                            </option>
-                        ))}
-                    </select>
-                </div>
 
                 {/* Messages */}
                 <div className="flex-1 overflow-y-auto p-4 space-y-4">
