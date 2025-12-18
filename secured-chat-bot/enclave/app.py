@@ -17,6 +17,7 @@ import logging
 from typing import Dict, Any, Optional
 
 from flask import Flask, jsonify, request
+from flask_cors import CORS
 
 from enclave import Enclave
 from ai_models.open_ai import OpenAI
@@ -32,6 +33,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
+CORS(app)  # Allow all origins
 
 # Default mock odyn API endpoint
 DEFAULT_MOCK_ODYN_API = "http://3.101.68.206:18000"

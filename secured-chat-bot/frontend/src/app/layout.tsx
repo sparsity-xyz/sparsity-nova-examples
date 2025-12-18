@@ -5,7 +5,7 @@ import './globals.css'
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
-    title: 'New Chat Bot - Sparsity Nova',
+    title: 'Fully Secured Chat Bot - Sparsity Nova',
     description: 'Verifiable AI chat with E2E encryption',
 }
 

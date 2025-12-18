@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { enclaveClient } from '@/lib/crypto';
 
 interface ApiKeyInputProps {
@@ -21,6 +21,57 @@ export default function ApiKeyInput({ isConnected, onApiKeySet }: ApiKeyInputPro
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [isSet, setIsSet] = useState(false);
+    const [isChecking, setIsChecking] = useState(false);
+    const [countdown, setCountdown] = useState<number | null>(null);
+    const [cachedPlatform, setCachedPlatform] = useState<string | null>(null);
+
+    // Check API key status when connected
+    const checkApiKeyStatus = useCallback(async () => {
+        if (!isConnected) return;
+
+        setIsChecking(true);
+        setError(null);
+
+        try {
+            const health = await enclaveClient.checkHealth();
+            console.log('Health check result:', health);
+
+            if (health.api_key_available) {
+                setIsSet(true);
+                setCachedPlatform((health as any).cached_platform || 'openai');
+                // Start countdown
+                setCountdown(3);
+            }
+        } catch (err) {
+            console.error('Error checking health:', err);
+            // Don't show error, just proceed to API key input
+        } finally {
+            setIsChecking(false);
+        }
+    }, [isConnected]);
+
+    // Check API key status when connection changes
+    useEffect(() => {
+        if (isConnected) {
+            checkApiKeyStatus();
+        }
+    }, [isConnected, checkApiKeyStatus]);
+
+    // Countdown timer for auto-proceed
+    useEffect(() => {
+        if (countdown === null) return;
+
+        if (countdown <= 0) {
+            onApiKeySet();
+            return;
+        }
+
+        const timer = setTimeout(() => {
+            setCountdown(countdown - 1);
+        }, 1000);
+
+        return () => clearTimeout(timer);
+    }, [countdown, onApiKeySet]);
 
     const handleSubmit = async () => {
         if (!apiKey.trim()) {
@@ -40,6 +91,7 @@ export default function ApiKeyInput({ isConnected, onApiKeySet }: ApiKeyInputPro
             const result = await enclaveClient.setApiKey(apiKey.trim(), platform);
             console.log('API key set result:', result);
             setIsSet(true);
+            setCachedPlatform(platform);
             setApiKey(''); // Clear the input for security
             onApiKeySet();
         } catch (err) {
@@ -50,6 +102,11 @@ export default function ApiKeyInput({ isConnected, onApiKeySet }: ApiKeyInputPro
         }
     };
 
+    const handleUpdateKey = () => {
+        setIsSet(false);
+        setCountdown(null);
+    };
+
     return (
         <div className="bg-[#1a1a1a] rounded-lg border border-gray-800 p-6">
             <h2 className="text-xl font-semibold text-white mb-4">
@@ -58,17 +115,29 @@ export default function ApiKeyInput({ isConnected, onApiKeySet }: ApiKeyInputPro
 
             {!isConnected ? (
                 <p className="text-gray-400">Connect to enclave first to set API key.</p>
+            ) : isChecking ? (
+                <div className="flex items-center gap-3">
+                    <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                    <span className="text-gray-400">Checking API key status...</span>
+                </div>
             ) : isSet ? (
                 <div className="space-y-3">
                     <div className="flex items-center gap-2">
                         <div className="w-3 h-3 rounded-full bg-green-500" />
-                        <span className="text-green-400 font-medium">API Key Cached</span>
+                        <span className="text-green-400 font-medium">API Key Already Configured</span>
                     </div>
-                    <p className="text-sm text-gray-400">
-                        Platform: <span className="text-white">{PLATFORMS.find(p => p.id === platform)?.name}</span>
-                    </p>
+                    {cachedPlatform && (
+                        <p className="text-sm text-gray-400">
+                            Platform: <span className="text-white">{PLATFORMS.find(p => p.id === cachedPlatform)?.name || cachedPlatform}</span>
+                        </p>
+                    )}
+                    {countdown !== null && countdown > 0 && (
+                        <p className="text-sm text-gray-400">
+                            Proceeding to chat in <span className="text-primary font-medium">{countdown}</span> seconds...
+                        </p>
+                    )}
                     <button
-                        onClick={() => setIsSet(false)}
+                        onClick={handleUpdateKey}
                         className="text-sm text-primary hover:underline"
                     >
                         Update API Key

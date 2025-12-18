@@ -31,7 +31,7 @@ export default function Home() {
                             <span className="text-white font-bold">N</span>
                         </div>
                         <div>
-                            <h1 className="text-xl font-bold text-white">New Chat Bot</h1>
+                            <h1 className="text-xl font-bold text-white">Fully Secured Chat Bot</h1>
                             <p className="text-sm text-gray-400">Sparsity Nova Platform</p>
                         </div>
                     </div>

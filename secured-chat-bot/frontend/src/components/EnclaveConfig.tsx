@@ -8,7 +8,7 @@ interface EnclaveConfigProps {
 }
 
 export default function EnclaveConfig({ onConnected }: EnclaveConfigProps) {
-    const [baseUrl, setBaseUrl] = useState('');
+    const [baseUrl, setBaseUrl] = useState('http://127.0.0.1:8000');
     const [isConnecting, setIsConnecting] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [enclaveAddress, setEnclaveAddress] = useState<string | null>(null);

@@ -102,34 +102,79 @@ export async function decodeAttestationDoc(base64Doc: string): Promise<DecodedAt
     // Decode the payload which contains the attestation document
     const attDoc = cbor.decode(payload);
 
-    // Convert PCRs to hex strings
+    // Robust field extraction helper (handles Map/Object and string/int keys)
+    const getField = (doc: any, name: string, id: number) => {
+        if (doc instanceof Map) {
+            return doc.get(name) ?? doc.get(id);
+        }
+        return doc[name] ?? doc[id];
+    };
+
+    // Extract fields
+    const moduleId = getField(attDoc, 'module_id', 1);
+    const timestamp = getField(attDoc, 'timestamp', 2);
+    const digest = getField(attDoc, 'digest', 3);
+    const pcrsRaw = getField(attDoc, 'pcrs', 4);
+    const certificate = getField(attDoc, 'certificate', 5);
+    const cabundle = getField(attDoc, 'cabundle', 6);
+    const publicKeyRaw = getField(attDoc, 'public_key', 7);
+    const userDataRaw = getField(attDoc, 'user_data', 8);
+    const nonce = getField(attDoc, 'nonce', 9);
+
+    // Convert PCRs to hex strings - handle both Map and plain object cases
     const pcrs: Record<string, string> = {};
-    if (attDoc.pcrs) {
-        for (const [key, value] of Object.entries(attDoc.pcrs)) {
-            if (value instanceof Uint8Array) {
-                pcrs[String(key)] = Array.from(value).map(b => b.toString(16).padStart(2, '0')).join('');
-            } else {
-                pcrs[String(key)] = String(value);
+    if (pcrsRaw) {
+        if (pcrsRaw instanceof Map) {
+            for (const [key, value] of Array.from(pcrsRaw.entries())) {
+                if (value instanceof Uint8Array || value instanceof ArrayBuffer) {
+                    pcrs[String(key)] = Array.from(new Uint8Array(value)).map(b => b.toString(16).padStart(2, '0')).join('');
+                } else {
+                    pcrs[String(key)] = String(value);
+                }
+            }
+        } else {
+            for (const [key, value] of Object.entries(pcrsRaw as Record<string, unknown>)) {
+                if (value instanceof Uint8Array || value instanceof ArrayBuffer) {
+                    pcrs[String(key)] = Array.from(new Uint8Array(value)).map(b => b.toString(16).padStart(2, '0')).join('');
+                } else {
+                    pcrs[String(key)] = String(value);
+                }
             }
         }
     }
 
     // Helper to convert Uint8Array to base64 for consistency
-    const toBase64 = (data: Uint8Array | undefined): string => {
+    const toBase64 = (data: any): string => {
         if (!data) return '';
-        return btoa(String.fromCharCode.apply(null, Array.from(data)));
+        if (data instanceof Uint8Array || data instanceof ArrayBuffer) {
+            return btoa(String.fromCharCode.apply(null, Array.from(new Uint8Array(data))));
+        }
+        return String(data);
     };
 
+    // Parse user_data
+    let userData = '';
+    if (userDataRaw) {
+        if (userDataRaw instanceof Uint8Array || userDataRaw instanceof ArrayBuffer) {
+            const decoder = new TextDecoder();
+            userData = decoder.decode(new Uint8Array(userDataRaw));
+        } else if (typeof userDataRaw === 'string') {
+            userData = userDataRaw;
+        } else {
+            userData = JSON.stringify(userDataRaw);
+        }
+    }
+
     return {
-        module_id: attDoc.module_id || '',
-        digest: attDoc.digest || '',
-        timestamp: attDoc.timestamp || 0,
+        module_id: moduleId ? String(moduleId) : '',
+        digest: digest instanceof Uint8Array || digest instanceof ArrayBuffer ? Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('') : String(digest || ''),
+        timestamp: typeof timestamp === 'number' ? timestamp : 0,
         pcrs,
-        certificate: toBase64(attDoc.certificate),
-        cabundle: (attDoc.cabundle || []).map((cert: Uint8Array) => toBase64(cert)),
-        public_key: toBase64(attDoc.public_key),
-        user_data: toBase64(attDoc.user_data),
-        nonce: toBase64(attDoc.nonce),
+        certificate: toBase64(certificate),
+        cabundle: Array.isArray(cabundle) ? cabundle.map((cert) => toBase64(cert)) : [],
+        public_key: publicKeyRaw ? (publicKeyRaw instanceof Uint8Array || publicKeyRaw instanceof ArrayBuffer ? Array.from(new Uint8Array(publicKeyRaw)).map(b => b.toString(16).padStart(2, '0')).join('') : String(publicKeyRaw)) : '',
+        user_data: userData,
+        nonce: nonce ? (nonce instanceof Uint8Array || nonce instanceof ArrayBuffer ? Array.from(new Uint8Array(nonce)).map(b => b.toString(16).padStart(2, '0')).join('') : String(nonce)) : '',
     };
 }
 
