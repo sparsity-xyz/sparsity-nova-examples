@@ -8,7 +8,7 @@ interface EnclaveConfigProps {
 }
 
 export default function EnclaveConfig({ onConnected }: EnclaveConfigProps) {
-    const [baseUrl, setBaseUrl] = useState('http://127.0.0.1:8000');
+    const [baseUrl, setBaseUrl] = useState('https://98.app.sparsity.cloud');
     const [isConnecting, setIsConnecting] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [enclaveAddress, setEnclaveAddress] = useState<string | null>(null);

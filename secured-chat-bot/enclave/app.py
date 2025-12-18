@@ -16,7 +16,7 @@ import time
 import logging
 from typing import Dict, Any, Optional
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 
 from enclave import Enclave
@@ -62,16 +62,19 @@ def index():
     """Health check endpoint with service information and API key status."""
     try:
         address = enclave.eth_address()
+        frontend_available = os.path.exists(FRONTEND_DIR) and os.path.isfile(os.path.join(FRONTEND_DIR, 'index.html'))
         return jsonify({
             "status": "ok",
-            "service": "New AI Chatbot",
+            "service": "Secured Chatbot",
             "version": "1.0.0",
             "enclave_address": address,
             "api_key_available": _cached_api_key is not None,
             "cached_platform": _cached_platform,
+            "frontend_available": frontend_available,
             "supported_platforms": list(PLATFORM_MAPPING.keys()),
             "endpoints": {
                 "/": "Health check and service info (includes api_key_available status)",
+                "/frontend": "Static frontend files",
                 "/set-api-key": "POST - Set API key (encrypted)",
                 "/talk": "POST - Send chat message (encrypted)"
             },
@@ -82,8 +85,35 @@ def index():
         return jsonify({"status": "error", "error": str(e)}), 500
 
 
+# Frontend static files directory
+FRONTEND_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "frontend"))
+
+
+@app.route('/frontend/')
+@app.route('/frontend/<path:path>')
+def serve_frontend(path=''):
+    """
+    Serve static files from the frontend build directory.
+    Supports SPA routing with fallback to index.html.
+    """
+    if not os.path.exists(FRONTEND_DIR):
+        return jsonify({"error": "Frontend not available"}), 404
+    
+    # If path is empty, serve index.html
+    if not path or path == '':
+        return send_from_directory(FRONTEND_DIR, 'index.html')
+    
+    # Try to serve the requested file
+    file_path = os.path.join(FRONTEND_DIR, path)
+    if os.path.isfile(file_path):
+        return send_from_directory(FRONTEND_DIR, path)
+    
+    # For SPA: fallback to index.html for client-side routing
+    return send_from_directory(FRONTEND_DIR, 'index.html')
+
+
 # Only register /.well-known/attestation in local dev mode (not in Docker)
-# In Docker, the enclave runtime provides this endpoint
+# In Docker, the enclaver runtime provides this endpoint
 if os.getenv("IN_DOCKER", "False").lower() != "true":
     @app.route('/.well-known/attestation', methods=['POST'])
     def attestation():
