@@ -19,7 +19,7 @@ from typing import Dict, Any, Optional
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 
-from enclave import Enclave
+from odyn import Odyn
 from ai_models.open_ai import OpenAI
 from ai_models.platform import Platform
 
@@ -33,8 +33,8 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 CORS(app)  # Allow all origins
 
-# Initialize enclave helper
-enclave = Enclave()
+# Initialize odyn helper
+odyn = Odyn()
 
 # Platform mapping
 PLATFORM_MAPPING: Dict[str, type] = {
@@ -51,7 +51,7 @@ _cached_platform: Optional[str] = None
 def index():
     """Health check endpoint with service information and API key status."""
     try:
-        address = enclave.eth_address()
+        address = odyn.eth_address()
         frontend_available = os.path.exists(FRONTEND_DIR) and os.path.isfile(os.path.join(FRONTEND_DIR, 'index.html'))
         return jsonify({
             "status": "ok",
@@ -115,7 +115,7 @@ if os.getenv("IN_DOCKER", "False").lower() != "true":
         """
         try:
             # Get raw CBOR attestation (same format as production)
-            attestation_cbor = enclave.get_attestation_raw()
+            attestation_cbor = odyn.get_attestation()
             
             # Return raw CBOR with proper content type
             from flask import Response
@@ -170,7 +170,7 @@ def set_api_key():
         # Decrypt the request
         logger.info("Decrypting set-api-key request...")
         try:
-            decrypted_str = enclave.decrypt_data(
+            decrypted_str = odyn.decrypt_data(
                 nonce_hex, client_public_key_hex, encrypted_data_hex
             )
             data = json.loads(decrypted_str)
@@ -205,7 +205,7 @@ def set_api_key():
         }
         
         response_json = json.dumps(response_data, sort_keys=True, separators=(',', ':'))
-        encrypted_response, server_public_key_hex, response_nonce_hex = enclave.encrypt_data(
+        encrypted_response, server_public_key_hex, response_nonce_hex = odyn.encrypt_data(
             response_json, client_public_key_der
         )
         
@@ -215,7 +215,7 @@ def set_api_key():
             "encrypted_data": encrypted_response
         }
         
-        signature = enclave.sign_message(encrypted_envelope)
+        signature = odyn.sign_message(encrypted_envelope)
         
         return jsonify({
             "sig": signature,
@@ -268,7 +268,7 @@ def talk():
         # Decrypt the request
         logger.info("Decrypting incoming request...")
         try:
-            decrypted_str = enclave.decrypt_data(
+            decrypted_str = odyn.decrypt_data(
                 nonce_hex, client_public_key_hex, encrypted_data_hex
             )
             data = json.loads(decrypted_str)
@@ -321,7 +321,7 @@ def talk():
         # Encrypt the response
         logger.info("Encrypting response...")
         response_json = json.dumps(response_data, sort_keys=True, separators=(',', ':'))
-        encrypted_response, server_public_key_hex, response_nonce_hex = enclave.encrypt_data(
+        encrypted_response, server_public_key_hex, response_nonce_hex = odyn.encrypt_data(
             response_json, client_public_key_der
         )
         
@@ -333,7 +333,7 @@ def talk():
         }
         
         # Sign the encrypted envelope
-        signature = enclave.sign_message(encrypted_envelope)
+        signature = odyn.sign_message(encrypted_envelope)
         
         return jsonify({
             "sig": signature,
@@ -347,7 +347,7 @@ def talk():
 
 if __name__ == "__main__":
     logger.info("Starting New AI Chatbot service...")
-    logger.info(f"ODYN API endpoint: {ODYN_API}")
+    logger.info(f"Odyn endpoint: {odyn.endpoint}") # Changed ODYN_API to odyn.endpoint
     logger.info("Endpoints:")
     logger.info("  GET  /             - Health check (includes api_key_available)")
     logger.info("  POST /set-api-key  - Set API key (encrypted)")

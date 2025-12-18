@@ -27,7 +27,15 @@ flowchart LR
 | **API Key Caching** | Set once, cached in enclave |
 | **Signed Responses** | ETH signature (EIP-191) |
 | **Static Frontend** | Served from enclave at `/frontend` |
-| **Multi-Platform** | OpenAI, Anthropic, Gemini |
+| **Multi-Model** | GPT-5.1, GPT-5, GPT-4.1, GPT-4o, GPT-4 |
+| **Verification Dialog** | View attestation, signatures, and full request/response details |
+
+## UI Features
+
+- **Model Selector**: Choose AI model from the header (GPT-5.1 default)
+- **Key Icon**: Click to view signature details on any response
+- **Shield Icon**: Click for full verification including attestation, request/response payloads
+- **Robot Avatar**: Visual indicator for enclave responses
 
 ## Quick Start
 
@@ -77,7 +85,7 @@ npm run dev
 
 | Service | URL | Description |
 |---------|-----|-------------|
-| Frontend (Dev) | http://localhost:3000 | Next.js dev server |
+| Frontend (Dev) | http://localhost:3000/frontend | Next.js dev server |
 | Backend | http://localhost:8000 | Flask API |
 | Frontend (Static) | http://localhost:8000/frontend | Built frontend |
 | Health Check | http://localhost:8000/ | API status |
@@ -100,10 +108,11 @@ cd frontend
 npm run build
 
 # Copy to enclave
+rm -rf ../enclave/frontend
 cp -r out ../enclave/frontend
 ```
 
-The built frontend is then served at `/frontend` by the enclave.
+The built frontend is served at `/frontend` by the enclave.
 
 ## Encryption Flow
 
@@ -128,11 +137,12 @@ sequenceDiagram
 secured-chat-bot/
 ├── enclave/           # TEE backend
 │   ├── app.py         # Flask + API key caching + static serving
-│   ├── enclave.py     # ECDH encryption
-│   ├── ai_models/     # OpenAI, Anthropic, Gemini
+│   ├── odyn.py        # ECDH encryption
+│   ├── ai_models/     # OpenAI
 │   └── frontend/      # Built frontend (from npm run build)
 └── frontend/          # Next.js source
     ├── src/lib/       # crypto.ts, attestation.ts
+    ├── src/components/# Chat.tsx, VerificationDialog.tsx
     └── src/app/       # page.tsx, verify/
 ```
 
@@ -141,5 +151,3 @@ secured-chat-bot/
 **Enclave:** `enclaver build && enclaver push`
 
 **Frontend:** Built and bundled inside enclave (served at `/frontend`)
-</CodeContent>
-<parameter name="EmptyFile">false

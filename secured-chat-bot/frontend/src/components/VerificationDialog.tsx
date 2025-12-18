@@ -60,6 +60,17 @@ export default function VerificationDialog({ isOpen, onClose, data }: Verificati
 
                 // Convert to DecodedAttestation format
                 const decoded: DecodedAttestation = {
+                    attestation_document: {
+                        module_id: attestationData.module_id || '',
+                        digest: attestationData.digest || '',
+                        timestamp: attestationData.timestamp || 0,
+                        pcrs: attestationData.pcrs || {},
+                        certificate: attestationData.has_certificate ? '[present]' : '',
+                        cabundle: attestationData.has_cabundle ? ['[present]'] : [],
+                        public_key: attestationData.public_key || '',
+                        user_data: userData ? JSON.stringify(userData) : '',
+                        nonce: attestationData.nonce || '',
+                    },
                     module_id: attestationData.module_id || '',
                     digest: attestationData.digest || '',
                     timestamp: attestationData.timestamp || 0,
@@ -124,7 +135,7 @@ export default function VerificationDialog({ isOpen, onClose, data }: Verificati
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor" className="h-5 w-5 text-primary">
                             <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z" />
                         </svg>
-                        <h2 className="text-lg font-semibold text-white">Full Chain Verification</h2>
+                        <h2 className="text-lg font-semibold text-white">Verification Details</h2>
                     </div>
                     <button onClick={onClose} className="text-gray-400 hover:text-white transition-colors">
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor" className="h-5 w-5">
@@ -189,7 +200,7 @@ export default function VerificationDialog({ isOpen, onClose, data }: Verificati
                                             <label className="text-sm font-medium text-gray-300">PCR Values (Code Measurement)</label>
                                         </div>
                                         <div className="p-3 bg-[#1a1a1a] rounded border border-gray-800 space-y-1">
-                                            {Object.entries(decodedAttestation.pcrs)
+                                            {decodedAttestation.pcrs && Object.entries(decodedAttestation.pcrs)
                                                 .filter(([key]) => ['0', '1', '2', '3'].includes(String(key)))
                                                 .sort(([a], [b]) => parseInt(a) - parseInt(b))
                                                 .map(([key, value]) => (
@@ -203,7 +214,7 @@ export default function VerificationDialog({ isOpen, onClose, data }: Verificati
 
                                     {/* Full Attestation - Expandable */}
                                     <div className="border border-gray-800 rounded-lg overflow-hidden">
-                                        <details className="group" open>
+                                        <details className="group">
                                             <summary className="px-4 py-3 bg-[#1a1a1a] cursor-pointer flex items-center justify-between hover:bg-[#252525] transition-colors">
                                                 <span className="text-sm font-medium text-gray-300">Full Attestation</span>
                                                 <svg
@@ -221,14 +232,20 @@ export default function VerificationDialog({ isOpen, onClose, data }: Verificati
                                                 {/* Module ID */}
                                                 <div>
                                                     <label className="text-xs font-medium text-gray-400">Module ID</label>
-                                                    <p className="mt-1 p-2 bg-[#1a1a1a] rounded border border-gray-800 font-mono text-xs text-white">{decodedAttestation.module_id}</p>
+                                                    <p className="mt-1 p-2 bg-[#1a1a1a] rounded border border-gray-800 font-mono text-xs text-white">{decodedAttestation.module_id || 'N/A'}</p>
+                                                </div>
+
+                                                {/* Digest */}
+                                                <div>
+                                                    <label className="text-xs font-medium text-gray-400">Digest</label>
+                                                    <p className="mt-1 p-2 bg-[#1a1a1a] rounded border border-gray-800 font-mono text-xs text-white">{decodedAttestation.digest || 'N/A'}</p>
                                                 </div>
 
                                                 {/* Timestamp */}
                                                 <div>
                                                     <label className="text-xs font-medium text-gray-400">Timestamp</label>
                                                     <p className="mt-1 p-2 bg-[#1a1a1a] rounded border border-gray-800 font-mono text-xs text-white">
-                                                        {new Date(decodedAttestation.timestamp).toLocaleString()}
+                                                        {decodedAttestation.timestamp ? `${new Date(decodedAttestation.timestamp).toLocaleString()} (${decodedAttestation.timestamp})` : 'N/A'}
                                                     </p>
                                                 </div>
 
@@ -236,63 +253,73 @@ export default function VerificationDialog({ isOpen, onClose, data }: Verificati
                                                 <div>
                                                     <label className="text-xs font-medium text-gray-400">All PCR Values</label>
                                                     <div className="mt-1 p-2 bg-[#1a1a1a] rounded border border-gray-800 space-y-1 max-h-40 overflow-y-auto">
-                                                        {Object.entries(decodedAttestation.pcrs)
-                                                            .sort(([a], [b]) => parseInt(a) - parseInt(b))
-                                                            .map(([key, value]) => (
-                                                                <div key={key} className="flex gap-2 text-xs">
-                                                                    <span className="text-gray-500 w-12 flex-shrink-0">PCR{key}:</span>
-                                                                    <span className="font-mono text-gray-300 break-all">{value}</span>
-                                                                </div>
-                                                            ))}
+                                                        {decodedAttestation.pcrs && Object.keys(decodedAttestation.pcrs).length > 0 ? (
+                                                            Object.entries(decodedAttestation.pcrs)
+                                                                .sort(([a], [b]) => parseInt(a) - parseInt(b))
+                                                                .map(([key, value]) => (
+                                                                    <div key={key} className="flex gap-2 text-xs">
+                                                                        <span className="text-gray-500 w-12 flex-shrink-0">PCR{key}:</span>
+                                                                        <span className="font-mono text-gray-300 break-all">{value || 'N/A'}</span>
+                                                                    </div>
+                                                                ))
+                                                        ) : (
+                                                            <span className="text-gray-500 text-xs">N/A</span>
+                                                        )}
                                                     </div>
                                                 </div>
 
+                                                {/* Public Key */}
+                                                <div>
+                                                    <label className="text-xs font-medium text-gray-400">Public Key</label>
+                                                    <p className="mt-1 p-2 bg-[#1a1a1a] rounded border border-gray-800 font-mono text-xs text-primary break-all max-h-20 overflow-y-auto">
+                                                        {decodedAttestation.public_key || 'N/A'}
+                                                    </p>
+                                                </div>
+
                                                 {/* Certificate */}
-                                                {decodedAttestation.certificate && (
-                                                    <div>
-                                                        <label className="text-xs font-medium text-gray-400">Certificate</label>
-                                                        <p className="mt-1 p-2 bg-[#1a1a1a] rounded border border-gray-800 font-mono text-xs text-gray-400 break-all max-h-24 overflow-y-auto">
-                                                            {decodedAttestation.certificate}
-                                                        </p>
-                                                    </div>
-                                                )}
+                                                <div>
+                                                    <label className="text-xs font-medium text-gray-400">Certificate</label>
+                                                    <p className="mt-1 p-2 bg-[#1a1a1a] rounded border border-gray-800 font-mono text-xs text-gray-400 break-all max-h-24 overflow-y-auto">
+                                                        {decodedAttestation.certificate || 'N/A'}
+                                                    </p>
+                                                </div>
 
                                                 {/* CA Bundle */}
-                                                {decodedAttestation.cabundle && decodedAttestation.cabundle.length > 0 && (
-                                                    <div>
-                                                        <label className="text-xs font-medium text-gray-400">CA Bundle ({decodedAttestation.cabundle.length} certs)</label>
-                                                        <div className="mt-1 p-2 bg-[#1a1a1a] rounded border border-gray-800 space-y-1 max-h-32 overflow-y-auto">
-                                                            {decodedAttestation.cabundle.map((cert, idx) => (
+                                                <div>
+                                                    <label className="text-xs font-medium text-gray-400">CA Bundle ({decodedAttestation.cabundle?.length || 0} certs)</label>
+                                                    <div className="mt-1 p-2 bg-[#1a1a1a] rounded border border-gray-800 space-y-1 max-h-32 overflow-y-auto">
+                                                        {decodedAttestation.cabundle && decodedAttestation.cabundle.length > 0 ? (
+                                                            decodedAttestation.cabundle.map((cert, idx) => (
                                                                 <div key={idx} className="text-xs">
                                                                     <span className="text-gray-500">Cert {idx + 1}:</span>
                                                                     <span className="font-mono text-gray-400 break-all ml-2">{cert.substring(0, 60)}...</span>
                                                                 </div>
-                                                            ))}
-                                                        </div>
+                                                            ))
+                                                        ) : (
+                                                            <span className="text-gray-500 text-xs">N/A</span>
+                                                        )}
                                                     </div>
-                                                )}
+                                                </div>
 
                                                 {/* Nonce */}
-                                                {decodedAttestation.nonce && (
-                                                    <div>
-                                                        <label className="text-xs font-medium text-gray-400">Nonce</label>
-                                                        <p className="mt-1 p-2 bg-[#1a1a1a] rounded border border-gray-800 font-mono text-xs text-gray-400 break-all">
-                                                            {decodedAttestation.nonce}
-                                                        </p>
-                                                    </div>
-                                                )}
+                                                <div>
+                                                    <label className="text-xs font-medium text-gray-400">Nonce</label>
+                                                    <p className="mt-1 p-2 bg-[#1a1a1a] rounded border border-gray-800 font-mono text-xs text-gray-400 break-all">
+                                                        {decodedAttestation.nonce || 'N/A'}
+                                                    </p>
+                                                </div>
 
                                                 {/* User Data */}
-                                                {decodedAttestation.user_data && (
-                                                    <div>
-                                                        <label className="text-xs font-medium text-gray-400">User Data</label>
-                                                        <pre className="mt-1 p-2 bg-[#1a1a1a] rounded border border-gray-800 font-mono text-xs text-gray-400 break-all whitespace-pre-wrap max-h-32 overflow-y-auto">
-                                                            {parsedUserData?.isJson && parsedUserData.jsonData
+                                                <div>
+                                                    <label className="text-xs font-medium text-gray-400">User Data</label>
+                                                    <pre className="mt-1 p-2 bg-[#1a1a1a] rounded border border-gray-800 font-mono text-xs text-gray-400 break-all whitespace-pre-wrap max-h-32 overflow-y-auto">
+                                                        {decodedAttestation.user_data
+                                                            ? (parsedUserData?.isJson && parsedUserData.jsonData
                                                                 ? JSON.stringify(parsedUserData.jsonData, null, 2)
-                                                                : parsedUserData?.ethAddr || decodedAttestation.user_data}
-                                                        </pre>
-                                                    </div>
-                                                )}
+                                                                : parsedUserData?.ethAddr || decodedAttestation.user_data)
+                                                            : 'N/A'}
+                                                    </pre>
+                                                </div>
 
                                             </div>
                                         </details>

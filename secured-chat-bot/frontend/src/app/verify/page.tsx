@@ -2,7 +2,7 @@
 
 import { useEffect, useState, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { decodeAttestationDoc, fetchAttestation, base64ToHex, parseUserData } from '@/lib/attestation';
+import { decodeAttestationDoc, fetchAttestation } from '@/lib/attestation';
 
 interface VerificationData {
     message: string;
@@ -48,9 +48,8 @@ function VerificationContent() {
 
         setIsLoadingAttestation(true);
         try {
-            const attDoc = await fetchAttestation(data.enclave_url);
-            const decoded = await decodeAttestationDoc(attDoc.attestation_doc);
-            setAttestation(decoded);
+            const attestationData = await fetchAttestation(data.enclave_url);
+            setAttestation(attestationData);
         } catch (err) {
             console.error('Attestation error:', err);
             setError('Failed to fetch attestation');
@@ -137,14 +136,14 @@ function VerificationContent() {
 
                         {attestation && (
                             <div className="space-y-3 text-xs">
-                                <div><span className="text-gray-400">Module ID:</span> <code className="text-white break-all">{attestation.module_id}</code></div>
-                                <div><span className="text-gray-400">Digest:</span> <code className="text-white">{attestation.digest}</code></div>
-                                <div><span className="text-gray-400">Timestamp:</span> <span className="text-white">{new Date(attestation.timestamp).toLocaleString()}</span></div>
+                                <div><span className="text-gray-400">Module ID:</span> <code className="text-white break-all">{attestation.attestation_document.module_id}</code></div>
+                                <div><span className="text-gray-400">Digest:</span> <code className="text-white">{attestation.attestation_document.digest}</code></div>
+                                <div><span className="text-gray-400">Timestamp:</span> <span className="text-white">{new Date(attestation.attestation_document.timestamp).toLocaleString()}</span></div>
 
                                 <div>
                                     <span className="text-gray-400">PCRs:</span>
                                     <div className="mt-1 space-y-1">
-                                        {Object.entries(attestation.pcrs).map(([key, value]) => (
+                                        {Object.entries(attestation.attestation_document.pcrs).map(([key, value]) => (
                                             <div key={key} className="text-white">
                                                 <span className="text-gray-500">PCR {key}:</span> <code className="break-all">{String(value)}</code>
                                             </div>
@@ -154,18 +153,60 @@ function VerificationContent() {
 
                                 <div>
                                     <span className="text-gray-400">Public Key (hex):</span>
-                                    <pre className="mt-1 p-2 bg-[#0a0a0a] rounded text-white break-all">{base64ToHex(attestation.public_key)}</pre>
+                                    <pre className="mt-1 p-2 bg-[#0a0a0a] rounded text-white break-all">{attestation.attestation_document.public_key}</pre>
                                 </div>
 
                                 <div>
                                     <span className="text-gray-400">User Data:</span>
-                                    {(() => {
-                                        const parsed = parseUserData(attestation.user_data);
-                                        if (parsed.ethAddr) {
-                                            return <div className="text-primary mt-1">ETH Address: {parsed.ethAddr}</div>;
-                                        }
-                                        return <code className="text-white break-all">{parsed.rawHex}</code>;
-                                    })()}
+                                    <div className="mt-1 p-2 bg-[#0a0a0a] rounded text-white overflow-auto max-h-40">
+                                        {typeof attestation.attestation_document.user_data === 'object' ? (
+                                            <pre>{JSON.stringify(attestation.attestation_document.user_data, null, 2)}</pre>
+                                        ) : (
+                                            <code className="break-all">{attestation.attestation_document.user_data}</code>
+                                        )}
+                                    </div>
+                                </div>
+
+                                {attestation.signature && (
+                                    <div>
+                                        <span className="text-gray-400">Attestation Signature:</span>
+                                        <div className="mt-1 p-2 bg-[#0a0a0a] rounded text-white break-all font-mono">
+                                            {attestation.signature}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {attestation.attestation_document.certificate && (
+                                    <div>
+                                        <span className="text-gray-400">Enclave Certificate (PEM):</span>
+                                        <pre className="mt-1 p-2 bg-[#0a0a0a] rounded text-white overflow-auto max-h-32 font-mono scrollbar-hide">
+                                            {attestation.attestation_document.certificate}
+                                        </pre>
+                                    </div>
+                                )}
+
+                                {attestation.attestation_document.cabundle && attestation.attestation_document.cabundle.length > 0 && (
+                                    <div>
+                                        <span className="text-gray-400">CA Bundle ({attestation.attestation_document.cabundle.length} certs):</span>
+                                        <div className="mt-1 space-y-2">
+                                            {attestation.attestation_document.cabundle.map((cert: string, i: number) => (
+                                                <pre key={i} className="p-2 bg-[#0a0a0a] rounded text-white overflow-auto max-h-32 font-mono scrollbar-hide">
+                                                    {cert}
+                                                </pre>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+
+                                <div className="flex gap-4 mt-2">
+                                    <div className="flex items-center gap-1">
+                                        <span className={`w-2 h-2 rounded-full ${attestation.attestation_document.certificate ? 'bg-green-500' : 'bg-red-500'}`}></span>
+                                        <span className="text-gray-400">Certificate: {attestation.attestation_document.certificate ? 'Present' : 'Missing'}</span>
+                                    </div>
+                                    <div className="flex items-center gap-1">
+                                        <span className={`w-2 h-2 rounded-full ${attestation.attestation_document.cabundle?.length > 0 ? 'bg-green-500' : 'bg-red-500'}`}></span>
+                                        <span className="text-gray-400">CA Bundle: {attestation.attestation_document.cabundle?.length > 0 ? 'Present' : 'Missing'}</span>
+                                    </div>
                                 </div>
                             </div>
                         )}

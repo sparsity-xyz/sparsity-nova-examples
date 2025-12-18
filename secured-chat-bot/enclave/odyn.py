@@ -17,14 +17,14 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.backends import default_backend
 
 
-class Enclave:
+class Odyn:
     """Wrapper for enclaver's odyn API with encryption support."""
     
-    DEFAULT_MOCK_ODYN_API = "http://3.101.68.206:18000"
+    DEFAULT_MOCK_ODYN_API = "http://odyn.sparsity.cloud:18000"
     
     def __init__(self, endpoint: Optional[str] = None):
         """
-        Initialize the Enclave helper.
+        Initialize the Odyn helper.
         
         Args:
             endpoint: The odyn API endpoint. If None, it automatically chooses
@@ -33,8 +33,8 @@ class Enclave:
         if endpoint:
             self.endpoint = endpoint
         else:
-            is_docker = os.getenv("IN_DOCKER", "False").lower() == "true"
-            self.endpoint = "http://localhost:18000" if is_docker else self.DEFAULT_MOCK_ODYN_API
+            is_enclave = os.getenv("IN_ENCLAVE", "False").lower() == "true"
+            self.endpoint = "http://localhost:18000" if is_enclave else self.DEFAULT_MOCK_ODYN_API
     
     def eth_address(self) -> str:
         """
@@ -219,11 +219,10 @@ class Enclave:
 
 
 if __name__ == '__main__':
-    # Test the enclave helper
+    # Test the Odyn helper
     import binascii
     
-    # Use the mock endpoint for testing
-    e = Enclave("http://3.101.68.206:18000")
+    e = Odyn()
     
     print("--- Basic Info ---")
     addr = e.eth_address()
@@ -262,8 +261,8 @@ if __name__ == '__main__':
         format=serialization.PublicFormat.SubjectPublicKeyInfo
     )
 
-    # 2. Test Decryption: Client encrypts for Enclave
-    print("Testing Decryption (Client -> Enclave)...")
+    # 2. Test Decryption: Client encrypts for Odyn
+    print("Testing Decryption (Client -> Odyn)...")
     server_public_key = serialization.load_der_public_key(pub_der, backend=default_backend())
     shared_secret = client_private_key.exchange(ec.ECDH(), server_public_key)
     aes_key = HKDF(
@@ -275,12 +274,12 @@ if __name__ == '__main__':
     ciphertext = AESGCM(aes_key).encrypt(nonce, plaintext.encode(), None)
     
     decrypted = e.decrypt_data(nonce.hex(), client_public_key_der.hex(), ciphertext.hex())
-    print(f"Decrypted by Enclave: {decrypted}")
+    print(f"Decrypted by Odyn: {decrypted}")
     assert plaintext == decrypted
 
-    # 3. Test Encryption: Enclave encrypts for Client
-    print("\nTesting Encryption (Enclave -> Client)...")
-    response_text = "Hello from the Enclave!"
+    # 3. Test Encryption: Odyn encrypts for Client
+    print("\nTesting Encryption (Odyn -> Client)...")
+    response_text = "Hello from the Odyn!"
     enc_data, enc_pub_key, enc_nonce = e.encrypt_data(response_text, client_public_key_der)
     
     # Client decrypts using the derived key

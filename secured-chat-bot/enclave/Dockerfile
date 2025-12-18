@@ -7,6 +7,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-ENV IN_DOCKER=true
+ENV IN_ENCLAVE=true
 
 CMD ["python", "app.py"]

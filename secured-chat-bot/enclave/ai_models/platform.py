@@ -8,9 +8,7 @@ from typing import List, Tuple
 
 # Supported models for each platform
 PLATFORM_MODELS = {
-    "openai": ["gpt-5.1", "gpt-5", "gpt-5-mini", "gpt-4.1", "gpt-4.1-mini", "gpt-4o", "gpt-4o-mini", "gpt-4"],
-    "anthropic": ["claude-3-7-sonnet-20250219", "claude-3-opus-20240229", "claude-3-sonnet-20240229"],
-    "gemini": ["gemini-2.0-flash-001", "gemini-1.5-pro", "gemini-1.5-flash"]
+    "openai": ["gpt-5.1", "gpt-5", "gpt-5-mini", "gpt-4.1", "gpt-4.1-mini", "gpt-4o", "gpt-4o-mini", "gpt-4"]
 }
 
 

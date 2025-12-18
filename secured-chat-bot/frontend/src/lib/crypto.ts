@@ -6,8 +6,7 @@
  */
 
 import * as secp256k1 from '@noble/secp256k1';
-import { hkdf } from '@noble/hashes/hkdf.js';
-import { sha256 } from '@noble/hashes/sha2.js';
+import { fetchAttestation, hexToBytes } from './attestation';
 
 export interface EncryptedPayload {
     nonce: string;     // hex-encoded bytes
@@ -36,16 +35,6 @@ function bufferToHex(buffer: ArrayBuffer | Uint8Array): string {
         .join('');
 }
 
-// Convert hex string to Uint8Array
-function hexToBytes(hex: string): Uint8Array {
-    if (hex.startsWith('0x')) hex = hex.slice(2);
-    const bytes = new Uint8Array(hex.length / 2);
-    for (let i = 0; i < hex.length; i += 2) {
-        bytes[i / 2] = parseInt(hex.substr(i, 2), 16);
-    }
-    return bytes;
-}
-
 // Curve types
 type CurveType = 'P-384' | 'secp256k1';
 
@@ -53,30 +42,62 @@ type CurveType = 'P-384' | 'secp256k1';
 const OID_SEC_P384 = '2b81040022';
 const OID_SECP256K1 = '2b8104000a';
 
-function detectCurve(derKeyHex: string): CurveType {
-    if (derKeyHex.includes(OID_SEC_P384) || derKeyHex.length === 240) {
+function detectCurve(keyHex: string): CurveType {
+    // Check for DER OIDs first
+    if (keyHex.includes(OID_SEC_P384)) {
         return 'P-384';
     }
-    if (derKeyHex.includes(OID_SECP256K1) || derKeyHex.length === 176) {
+    if (keyHex.includes(OID_SECP256K1)) {
         return 'secp256k1';
     }
-    // Fallback based on length if OID not found
-    if (derKeyHex.length > 200) return 'P-384';
+
+    // Check based on key length (hex string length)
+    // DER lengths: P-384 = 240 chars (120 bytes), secp256k1 = 176 chars (88 bytes)
+    // Raw lengths: P-384 = 194 chars (97 bytes), secp256k1 = 130 chars (65 bytes)
+    const len = keyHex.length;
+
+    if (len === 240 || len === 194) return 'P-384';  // DER or raw P-384
+    if (len === 176 || len === 130) return 'secp256k1';  // DER or raw secp256k1
+
+    // Fallback based on approximate length
+    if (len > 160) return 'P-384';
     return 'secp256k1';
 }
 
 /**
- * Utility to convert DER to raw point.
+ * Utility to convert DER to raw point, or pass through if already raw.
  * P-384 DER (SPKI) -> 97 bytes raw point
+ * P-384 raw -> 97 bytes (pass through)
  * secp256k1 DER (SPKI) -> 65 bytes raw point
+ * secp256k1 raw -> 65 bytes (pass through)
  */
 function derToRaw(derKey: Uint8Array, curve: CurveType): Uint8Array {
-    if (curve === 'P-384' && derKey.length === 120) {
-        return derKey.slice(23);
+    // P-384
+    if (curve === 'P-384') {
+        if (derKey.length === 120) {
+            // DER SPKI format, strip 23-byte header
+            return derKey.slice(23);
+        }
+        if (derKey.length === 97) {
+            // Already raw
+            return derKey;
+        }
     }
-    if (curve === 'secp256k1' && derKey.length === 88) {
-        return derKey.slice(23);
+
+    // secp256k1
+    if (curve === 'secp256k1') {
+        if (derKey.length === 88) {
+            // DER SPKI format, strip 23-byte header
+            return derKey.slice(23);
+        }
+        if (derKey.length === 65) {
+            // Already raw
+            return derKey;
+        }
     }
+
+    // Unknown format, return as-is
+    console.warn(`[derToRaw] Unexpected key length ${derKey.length} for curve ${curve}`);
     return derKey;
 }
 
@@ -113,6 +134,10 @@ export class EnclaveClient {
     private secpPubKey: Uint8Array | null = null;
     private serverSecpPubKeyRaw: Uint8Array | null = null;
 
+    get baseUrl() {
+        return this.enclaveBaseUrl;
+    }
+
     async connect(baseUrl: string): Promise<AttestationDoc> {
         this.enclaveBaseUrl = baseUrl.replace(/\/$/, '');
 
@@ -134,7 +159,7 @@ export class EnclaveClient {
 
             this.serverP384Key = await crypto.subtle.importKey(
                 'raw',
-                serverPubKeyRaw,
+                serverPubKeyRaw as any,
                 { name: 'ECDH', namedCurve: 'P-384' },
                 true,
                 []
@@ -146,8 +171,14 @@ export class EnclaveClient {
             const serverPubKeyDer = hexToBytes(attestation.public_key);
             this.serverSecpPubKeyRaw = derToRaw(serverPubKeyDer, 'secp256k1');
 
-            // Validate it
-            secp256k1.Point.fromHex(this.serverSecpPubKeyRaw);
+            // Validate the point (v3.0+ uses string for fromHex, and we need to check if it's a valid point)
+            try {
+                const rawHex = Array.from(this.serverSecpPubKeyRaw).map(b => b.toString(16).padStart(2, '0')).join('');
+                secp256k1.Point.fromHex(rawHex);
+            } catch (e) {
+                console.error('Invalid server public key:', attestation.public_key);
+                throw new Error(`Failed to validate server public key: ${e instanceof Error ? e.message : String(e)}`);
+            }
         }
 
         this.isConnected = true;
@@ -155,99 +186,19 @@ export class EnclaveClient {
     }
 
     async fetchAttestation(): Promise<AttestationDoc & { parsedAttestation?: string }> {
-        const response = await fetch(`${this.enclaveBaseUrl}/.well-known/attestation`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({}),
-        });
-        if (!response.ok) {
-            throw new Error(`Failed to fetch attestation: ${response.status}`);
-        }
+        try {
+            const result = await fetchAttestation(this.enclaveBaseUrl);
+            const publicKey = result.attestation_document.public_key || '';
 
-        const contentType = response.headers.get('content-type') || '';
-
-        if (contentType.includes('application/cbor') || contentType.includes('application/octet-stream')) {
-            const cbor = await import('cbor-web');
-            const arrayBuffer = await response.arrayBuffer();
-            const cborData = cbor.decode(new Uint8Array(arrayBuffer));
-            return this.parseCborAttestation(cborData);
-        } else {
-            const jsonData = await response.json();
-            if (jsonData.attestation_document) {
-                return {
-                    attestation_doc: JSON.stringify(jsonData),
-                    public_key: jsonData.attestation_document.public_key || '',
-                    parsedAttestation: JSON.stringify(jsonData),
-                };
-            }
-            if (jsonData.attestation_doc) {
-                const cbor = await import('cbor-web');
-                const binary = atob(jsonData.attestation_doc);
-                const bytes = new Uint8Array(binary.length);
-                for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-                const cborData = cbor.decode(bytes);
-                const parsed = await this.parseCborAttestation(cborData);
-                return { ...parsed, attestation_doc: jsonData.attestation_doc };
-            }
-            return jsonData;
-        }
-    }
-
-    private async parseCborAttestation(cborData: any): Promise<AttestationDoc & { parsedAttestation?: string }> {
-        const cbor = await import('cbor-web');
-        const bytesToHex = (bytes: Uint8Array | ArrayBuffer): string => {
-            const arr = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
-            return bufferToHex(arr);
-        };
-
-        const payload = Array.isArray(cborData) ? cborData[2] : cborData;
-        const signature = Array.isArray(cborData) && cborData.length > 3 ? cborData[3] : null;
-        const doc = cbor.decode(payload);
-
-        const getField = (d: any, name: string, id: number) => {
-            if (d instanceof Map) return d.get(name) ?? d.get(id);
-            return d[name] ?? d[id];
-        };
-
-        const publicKeyRaw = getField(doc, 'public_key', 7);
-        const publicKey = publicKeyRaw ? bytesToHex(publicKeyRaw) : '';
-        const userDataRaw = getField(doc, 'user_data', 8);
-        const moduleId = getField(doc, 'module_id', 1);
-        const timestamp = getField(doc, 'timestamp', 2);
-        const pcrsRaw = getField(doc, 'pcrs', 4);
-
-        const pcrs: any = {};
-        if (pcrsRaw) {
-            const entries = pcrsRaw instanceof Map ? Array.from(pcrsRaw.entries()) : Object.entries(pcrsRaw);
-            for (const [k, v] of entries) {
-                pcrs[String(k)] = (v instanceof Uint8Array) ? bytesToHex(v) : String(v);
-            }
-        }
-
-        let userData = null;
-        if (userDataRaw) {
-            try {
-                const decoder = new TextDecoder();
-                userData = JSON.parse(decoder.decode(new Uint8Array(userDataRaw)));
-            } catch (e) { }
-        }
-
-        const parsedResult = {
-            attestation_document: {
-                module_id: String(moduleId || ''),
-                timestamp: Number(timestamp || 0),
+            return {
+                attestation_doc: result.raw_doc,
                 public_key: publicKey,
-                user_data: userData,
-                pcrs: pcrs
-            },
-            signature: signature ? bytesToHex(signature) : null
-        };
-
-        return {
-            attestation_doc: JSON.stringify(parsedResult),
-            public_key: publicKey,
-            parsedAttestation: JSON.stringify(parsedResult),
-        };
+                parsedAttestation: JSON.stringify(result)
+            };
+        } catch (e) {
+            console.error('Failed to fetch attestation:', e);
+            throw e;
+        }
     }
 
     private async deriveSharedKey(peerPublicKeyDer: string): Promise<CryptoKey> {
@@ -259,10 +210,10 @@ export class EnclaveClient {
         if (this.curve === 'P-384') {
             if (!this.p384KeyPair) throw new Error('P-384 keys not initialized');
             const peerKey = await crypto.subtle.importKey(
-                'raw', peerRaw, { name: 'ECDH', namedCurve: 'P-384' }, true, []
+                'raw', peerRaw as any, { name: 'ECDH', namedCurve: 'P-384' }, true, []
             );
             sharedSecret = await crypto.subtle.deriveBits(
-                { name: 'ECDH', public: peerKey }, this.p384KeyPair.privateKey, 384
+                { name: 'ECDH', public: peerKey }, (this.p384KeyPair as any).privateKey, 384
             );
         } else {
             if (!this.secpPrivKey) throw new Error('secp256k1 keys not initialized');
@@ -271,7 +222,7 @@ export class EnclaveClient {
         }
 
         const hkdfKey = await crypto.subtle.importKey(
-            'raw', sharedSecret, { name: 'HKDF' }, false, ['deriveKey']
+            'raw', sharedSecret as any, { name: 'HKDF' }, false, ['deriveKey']
         );
 
         return crypto.subtle.deriveKey(
@@ -291,18 +242,12 @@ export class EnclaveClient {
     async encrypt(plaintext: string): Promise<EncryptedPayload> {
         if (!this.isConnected) throw new Error('Not connected');
 
-        // Use server key from connection initialization for the first encryption
-        // Actually, we usually encrypt for the server's public key we got from attestation
-        // In the first request (set-api-key), we use this.serverP384Key or similar.
-
-        // However, deriveSharedKey expects a DER string.
-        // Let's get the server key we stored or the one from attestation.
         const attestation = await this.fetchAttestation();
         const aesKey = await this.deriveSharedKey(attestation.public_key);
 
         const nonce = crypto.getRandomValues(new Uint8Array(32));
         const ciphertext = await crypto.subtle.encrypt(
-            { name: 'AES-GCM', iv: nonce },
+            { name: 'AES-GCM', iv: nonce.slice(0, 12) as any }, // Standard AES-GCM expects 12-byte IV
             aesKey,
             new TextEncoder().encode(plaintext)
         );
@@ -326,15 +271,12 @@ export class EnclaveClient {
         if (!this.isConnected) throw new Error('Not connected');
 
         const aesKey = await this.deriveSharedKey(payload.public_key);
-
-        // IMPORTANT: Odyn returns 32-byte nonces, but standard AES-GCM (WebCrypto) 
-        // expects 12-byte IVs. We use the first 12 bytes.
         const nonceBytes = hexToBytes(payload.nonce).slice(0, 12);
 
         const plaintext = await crypto.subtle.decrypt(
-            { name: 'AES-GCM', iv: nonceBytes },
+            { name: 'AES-GCM', iv: nonceBytes as any },
             aesKey,
-            hexToBytes(payload.encrypted_data)
+            hexToBytes(payload.encrypted_data) as any
         );
 
         return new TextDecoder().decode(plaintext);
