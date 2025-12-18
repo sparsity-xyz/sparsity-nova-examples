@@ -117,7 +117,7 @@ sequenceDiagram
     Note over F: Generate P-384 keypair<br/>Derive shared secret (ECDH)
     F->>E: POST /set-api-key (encrypted)
     F->>E: POST /talk (encrypted)
-    E-->>F: Response + signature
+    E-->>F: Encrypted response + signature
 ```
 
 **Crypto specs:** P-384 ECDH → HKDF-SHA256 → AES-256-GCM (32-byte nonce)
