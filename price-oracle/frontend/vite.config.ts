@@ -23,7 +23,9 @@ export default defineConfig({
     ),
   },
   server: {
+    host: '0.0.0.0', // Listen on all network interfaces
     port: 3000,
+    allowedHosts: ['all'], // Allow all hostnames
     proxy: {
       '/api': {
         target: 'http://localhost:5000',
