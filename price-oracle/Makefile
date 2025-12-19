@@ -114,7 +114,18 @@ deploy-contract-local: build-contract
 	@echo "Updating config.json..."
 	@CONTRACT_ADDRESS=$$(python3 -c 'import json; print([t["contractAddress"] for t in json.load(open("contracts/broadcast/Deploy.s.sol/31337/run-latest.json"))["transactions"] if t["contractName"] == "BTCPriceOracle"][0])') && \
 	echo "Found contract address: $$CONTRACT_ADDRESS" && \
-	python3 -c 'import json; data = json.load(open("config.json")); data["contract_address"] = "'$$CONTRACT_ADDRESS'"; data["rpc_url"] = "http://127.0.0.1:8545"; data["chain_id"] = 31337; json.dump(data, open("config.json", "w"), indent=2); print("config.json updated!")'
+	python3 -c 'import json; data = json.load(open("backend/config.json")); data["contract_address"] = "'$$CONTRACT_ADDRESS'"; data["rpc_url"] = "http://127.0.0.1:8545"; data["chain_id"] = 31337; json.dump(data, open("backend/config.json", "w"), indent=2); print("config.json updated!")' && \
+	echo "Updating frontend/vite.config.ts..." && \
+	python3 -c "import sys, re; \
+contract_addr = '$$CONTRACT_ADDRESS'; \
+config = open('frontend/vite.config.ts').read(); \
+config = re.sub(r\"process\.env\.VITE_CONTRACT_ADDRESS \|\| '[^']*'\", f\"process.env.VITE_CONTRACT_ADDRESS || '{contract_addr}'\", config); \
+config = re.sub(r\"process\.env\.VITE_CHAIN_ID \|\| '[^']*'\", \"process.env.VITE_CHAIN_ID || '31337'\", config); \
+config = re.sub(r\"process\.env\.VITE_CHAIN_NAME \|\| '[^']*'\", \"process.env.VITE_CHAIN_NAME || 'Anvil Local'\", config); \
+config = re.sub(r\"process\.env\.VITE_RPC_URL \|\| '[^']*'\", \"process.env.VITE_RPC_URL || 'http://127.0.0.1:8545'\", config); \
+config = re.sub(r\"process\.env\.VITE_EXPLORER_URL \|\| '[^']*'\", \"process.env.VITE_EXPLORER_URL || 'http://localhost:8545'\", config); \
+open('frontend/vite.config.ts', 'w').write(config); \
+print('frontend/vite.config.ts updated!')"
 
 # Set oracle address on contract (after enclave is deployed)
 # Usage: make set-oracle ORACLE=0x...
@@ -136,14 +147,14 @@ ifndef TEE_WALLET
 	$(error TEE_WALLET is required. Usage: make register-tee-wallet TEE_WALLET=0x...)
 endif
 	@echo "Registering TEE wallet: $(TEE_WALLET)"
-	@CONTRACT=$$(python3 -c 'import json; print(json.load(open("config.json"))["contract_address"])') && \
-	REGISTRY=$$(python3 -c 'import json; print(json.load(open("config.json"))["contract_address"])') && \
-	RPC=$$(python3 -c 'import json; print(json.load(open("config.json"))["rpc_url"])') && \
+	@CONTRACT=$$(python3 -c 'import json; print(json.load(open("backend/config.json"))["contract_address"])') && \
+	REGISTRY=$$(python3 -c 'import json; print(json.load(open("backend/config.json"))["contract_address"])') && \
+	RPC=$$(python3 -c 'import json; print(json.load(open("backend/config.json"))["rpc_url"])') && \
 	echo "Calling registerTEEWallet on contract $$CONTRACT..." && \
 	cast send --rpc-url $$RPC --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
 		$$CONTRACT "registerTEEWallet(address)" $(TEE_WALLET)
 	@echo "Funding TEE wallet with 0.01 ETH..."
-	@RPC=$$(python3 -c 'import json; print(json.load(open("config.json"))["rpc_url"])') && \
+	@RPC=$$(python3 -c 'import json; print(json.load(open("backend/config.json"))["rpc_url"])') && \
 	cast send --rpc-url $$RPC --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 $(TEE_WALLET) --value 0.01ether
 	@echo "TEE wallet registered and funded!"
 

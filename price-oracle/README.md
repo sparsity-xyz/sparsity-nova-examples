@@ -16,12 +16,23 @@ make deploy-contract-local
 ```
 set mock TEE wallet
 ```
-make register-tee-wallet TEE_WALLET=0x8141ed5fbd2749c7e2788ed6b3bd54b9b1b0347f
+make register-tee-wallet TEE_WALLET=0xabe4705b049a73408c2ad6bad9296b60cb373d8a
 ```
 
 ### backend service
 ```
+cd backend
+
 python3 app.py
+```
+
+### frontend service
+```
+cd frontend
+
+npm install
+
+npm run dev
 ```
 
 

@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 
 # Enclaver odyn API endpoint (internal)
-ODYN_API = "http://localhost:18000" if os.getenv("IN_DOCKER", "False").lower() == "true" else "http://54.215.216.173:18000"
+ODYN_API = "http://localhost:18000" if os.getenv("IN_DOCKER", "False").lower() == "true" else "http://odyn.sparsity.cloud:18000"
 
 # Global config
 config = {}
