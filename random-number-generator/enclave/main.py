@@ -13,7 +13,7 @@ from fastapi.requests import Request
 from fastapi.staticfiles import StaticFiles
 
 from config import Config
-from enclave import Enclave
+from odyn import Odyn
 
 
 logging.basicConfig(
@@ -40,7 +40,7 @@ class RandomNumberGenerator:
             abi=Config.CONTRACT_ABI,
         )
 
-        self.enclaver = Enclave(Config.ENCLAVER_ENDPOINT)
+        self.enclaver = Odyn()
 
         # Operator account
         self.operator_address = Web3.to_checksum_address(self.enclaver.eth_address())
@@ -78,6 +78,17 @@ class RandomNumberGenerator:
             self.consumer_mounted = True
         else:
             logging.warning(f"⚠️ Consumer frontend path not found: {consumer_path}")
+
+        # Mount frontend
+        self.frontend_mounted = False
+        frontend_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "frontend"))
+        if os.path.exists(frontend_path):
+            self.app.mount("/frontend", StaticFiles(directory=frontend_path, html=True), name="frontend")
+            logging.info(f"✅ Mounted frontend at /frontend from {frontend_path}")
+            self.frontend_mounted = True
+        else:
+            logging.warning(f"⚠️ Frontend path not found: {frontend_path}")
+
         self.init_router()
 
     def init_router(self):
@@ -98,6 +109,7 @@ class RandomNumberGenerator:
             "processed_requests": len(self.processed_requests),
             "explorer": f"https://sepolia.basescan.org/address/{self.contract_address}",
             "consumer": f"{req.base_url}consumer" if self.consumer_mounted else None,
+            "frontend": f"{req.base_url}frontend" if self.frontend_mounted else None,
         }
 
     async def request_info(self, request_id):
