@@ -71,13 +71,13 @@ class RandomNumberGenerator:
 
         # Mount consumer frontend
         self.consumer_mounted = False
-        consumer_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "consumer-frontend"))
+        consumer_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "consumer"))
         if os.path.exists(consumer_path):
             self.app.mount("/consumer", StaticFiles(directory=consumer_path, html=True), name="consumer")
-            logging.info(f"✅ Mounted consumer frontend at /consumer from {consumer_path}")
+            logging.info(f"✅ Mounted consumer at /consumer from {consumer_path}")
             self.consumer_mounted = True
         else:
-            logging.warning(f"⚠️ Consumer frontend path not found: {consumer_path}")
+            logging.warning(f"⚠️ Consumer path not found: {consumer_path}")
 
         # Mount frontend
         self.frontend_mounted = False
