@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RNG Consumer - Sparsity Nova</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="ethers-5.7.umd.min.js"></script>
+</head>
+
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="logo">
+                <span class="logo-icon">🎲</span>
+                <h1>RNG Consumer</h1>
+            </div>
+            <div class="wallet-section">
+                <button id="connectBtn" class="btn btn-primary">
+                    <span class="btn-icon">🔗</span>
+                    Connect Wallet
+                </button>
+                <div id="walletInfo" class="wallet-info hidden">
+                    <span class="network-badge" id="networkBadge">Base Sepolia</span>
+                    <span class="address" id="walletAddress"></span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Configuration Panel -->
+            <section class="panel config-panel">
+                <h2>⚙️ Configuration</h2>
+                <div class="form-group">
+                    <label for="rngAddress">RNG Contract Address</label>
+                    <input type="text" id="rngAddress" placeholder="0x..."
+                        value="0x5a5De497725Da2751F743a0cC922cB8F91811c28">
+                </div>
+                <div class="mode-selector">
+                    <label>Request Mode</label>
+                    <div class="mode-buttons">
+                        <button class="mode-btn active" data-mode="without-callback">
+                            <span class="mode-icon">📊</span>
+                            <span class="mode-title">Without Callback</span>
+                            <span class="mode-desc">Poll for results</span>
+                        </button>
+                        <button class="mode-btn" data-mode="with-callback">
+                            <span class="mode-icon">📞</span>
+                            <span class="mode-title">With Callback</span>
+                            <span class="mode-desc">Auto-receive results</span>
+                        </button>
+                    </div>
+                </div>
+                <div id="consumerAddressGroup" class="form-group hidden">
+                    <label for="consumerAddress">Consumer Contract Address</label>
+                    <input type="text" id="consumerAddress" placeholder="0x... (RNGConsumer contract)"
+                        value="0x22Db9cb7AA933bc5a27cf0f4a6d7b8d5451328A5">
+                    <small>Deploy RNGConsumer contract first for callback mode</small>
+                </div>
+            </section>
+
+            <!-- Request Panel -->
+            <section class="panel request-panel">
+                <h2>🎯 Request Random Numbers</h2>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="minVal">Min Value (inclusive)</label>
+                        <input type="number" id="minVal" value="1" min="0">
+                    </div>
+                    <div class="form-group">
+                        <label for="maxVal">Max Value (exclusive)</label>
+                        <input type="number" id="maxVal" value="100" min="1">
+                    </div>
+                    <div class="form-group">
+                        <label for="count">Count</label>
+                        <input type="number" id="count" value="3" min="1" max="100">
+                    </div>
+                </div>
+                <button id="requestBtn" class="btn btn-large btn-gradient" disabled>
+                    <span class="btn-icon">🎲</span>
+                    Request Random Numbers
+                </button>
+                <div id="requestStatus" class="status-message hidden"></div>
+            </section>
+
+            <!-- Results Panel -->
+            <section class="panel results-panel">
+                <h2>📋 Request History</h2>
+                <div id="noRequests" class="empty-state">
+                    <span class="empty-icon">📭</span>
+                    <p>No requests yet. Make your first request above!</p>
+                </div>
+                <div id="requestsList" class="requests-list"></div>
+            </section>
+        </main>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>Powered by <a href="https://sparsity.ai" target="_blank">Sparsity Nova Platform</a></p>
+        </footer>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div id="loadingOverlay" class="loading-overlay hidden">
+        <div class="loading-spinner"></div>
+        <p id="loadingText">Processing...</p>
+    </div>
+
+    <script src="abi.js"></script>
+    <script src="app.js"></script>
+</body>
+
+</html>
