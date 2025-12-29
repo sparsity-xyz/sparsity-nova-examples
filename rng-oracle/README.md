@@ -1,6 +1,6 @@
 # RNG Oracle
 
-The RNG Oracle is a Verifiable Random Number Generator built on the [Sparsity Nova Platform](https://nova.sparsity.ai/). It uses a Trusted Execution Environment (TEE) to generate cryptographically secure random numbers and fulfills on-chain requests, enabling developers to build trustless applications like lotteries, games, and autonomous agents.
+The RNG Oracle is a Verifiable Random Number Generator built on the [Sparsity Nova Platform](https://sparsity.cloud). It uses a Trusted Execution Environment (TEE) to generate cryptographically secure random numbers and fulfills on-chain requests, enabling developers to build trustless applications like lotteries, games, and autonomous agents.
 
 ![Architecture](./architecture.png)
 
@@ -104,7 +104,7 @@ npx hardhat verify --network baseSepolia <CONTRACT_ADDRESS> <REGISTRY_CONTRACT>
 
 ## Step 2: Deploy Enclave Service on Nova Platform
 
-1. Go to [https://nova.sparsity.ai/](https://nova.sparsity.ai/)
+1. Go to [https://sparsity.cloud](https://sparsity.cloud)
 2. Create a new app with the `enclave/` directory
 3. Deploy and wait for registration
 
