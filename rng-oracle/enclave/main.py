@@ -64,7 +64,7 @@ class RandomNumberGenerator:
         self.processed_requests = set()
 
         self.app = FastAPI(
-            title="Random Number Generator Service",
+            title="RNG Oracle Service",
             description="Off-chain service for generating and fulfilling random numbers",
             version="1.0.0"
         )
@@ -99,7 +99,7 @@ class RandomNumberGenerator:
 
     async def status(self, req: Request):
         return {
-            "service": "Random Number Generator",
+            "service": "RNG Oracle",
             "version": "1.0.0",
             "status": "running",
             "is_operator": self.is_operator,

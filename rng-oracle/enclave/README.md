@@ -68,7 +68,7 @@ curl http://localhost:8000/
 Response:
 ```json
 {
-    "service": "Random Number Generator",
+    "service": "RNG Oracle",
     "version": "1.0.0",
     "status": "running",
     "is_operator": true,

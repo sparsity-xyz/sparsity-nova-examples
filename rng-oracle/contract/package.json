@@ -1,5 +1,5 @@
 {
-  "name": "random-number-generator-contract",
+  "name": "rng-oracle-contract",
   "version": "1.0.0",
   "description": "Random Number Generator Contract for Sparsity Nova Platform",
   "scripts": {
