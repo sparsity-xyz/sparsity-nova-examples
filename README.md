@@ -363,7 +363,7 @@ This approach allows users to access the complete application interface directly
 | Example Project | Description |
 |-----------------|-------------|
 | [secured-chat-bot](./secured-chat-bot) | Secure chatbot demonstrating end-to-end encryption |
-| [random-number-generator](./random-number-generator) | Random number generator showcasing basic enclave features |
+| [rng-oracle](./rng-oracle) | RNG Oracle for verifiable on-chain random numbers |
 | [price-oracle](./price-oracle) | Price oracle demonstrating API signature verification |
 | [coin-price-bot](./coin-price-bot) | Cryptocurrency price bot |
 
