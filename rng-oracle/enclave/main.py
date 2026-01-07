@@ -69,25 +69,15 @@ class RandomNumberGenerator:
             version="1.0.0"
         )
 
-        # Mount consumer frontend
+        # Mount consumer frontend (built from consumer project)
         self.consumer_mounted = False
-        consumer_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "consumer"))
+        consumer_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "consumer-dist"))
         if os.path.exists(consumer_path):
             self.app.mount("/consumer", StaticFiles(directory=consumer_path, html=True), name="consumer")
             logging.info(f"✅ Mounted consumer at /consumer from {consumer_path}")
             self.consumer_mounted = True
         else:
             logging.warning(f"⚠️ Consumer path not found: {consumer_path}")
-
-        # Mount frontend
-        self.frontend_mounted = False
-        frontend_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "frontend"))
-        if os.path.exists(frontend_path):
-            self.app.mount("/frontend", StaticFiles(directory=frontend_path, html=True), name="frontend")
-            logging.info(f"✅ Mounted frontend at /frontend from {frontend_path}")
-            self.frontend_mounted = True
-        else:
-            logging.warning(f"⚠️ Frontend path not found: {frontend_path}")
 
         self.init_router()
 
@@ -109,7 +99,6 @@ class RandomNumberGenerator:
             "processed_requests": len(self.processed_requests),
             "explorer": f"https://sepolia.basescan.org/address/{self.contract_address}",
             "consumer": f"{req.base_url}consumer" if self.consumer_mounted else None,
-            "frontend": f"{req.base_url}frontend" if self.frontend_mounted else None,
         }
 
     async def request_info(self, request_id):
