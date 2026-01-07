@@ -1008,11 +1008,11 @@ Verify:
 
 ### 8.2 Check Attestation
 
-```bash
-curl https://<your-app>.nova.sparsity.cloud/attestation
-```
+View the TEE attestation document on the Nova Platform:
 
-This returns the TEE attestation document proving the code is running inside a genuine AWS Nitro Enclave.
+1. Go to [https://sparsity.cloud/explore](https://sparsity.cloud/explore)
+2. Find your deployed application
+3. View the attestation document proving the code is running inside a genuine AWS Nitro Enclave
 
 ### 8.3 Monitor Logs
 
@@ -1212,7 +1212,7 @@ npx hardhat console --network baseSepolia
 
 ### Getting Help
 
-- [Nova Platform Documentation](https://docs.sparsity.cloud)
+- [Nova Platform Documentation](https://sparsity.cloud/resources)
 - [Sparsity Discord](https://discord.gg/sparsity)
 - [GitHub Issues](https://github.com/sparsity-xyz/sparsity-nova-examples/issues)
 
