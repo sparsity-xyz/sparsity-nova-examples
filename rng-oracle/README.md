@@ -56,6 +56,7 @@ This section describes how to deploy and run the RNG Oracle on the Sparsity Nova
 ```
 rng-oracle/
 ├── README.md                 # This file
+├── tutorial.md               # Development tutorial
 ├── architecture.png          # Architecture diagram
 ├── contract/                 # Smart contracts (Hardhat)
 │   ├── contracts/
@@ -66,14 +67,20 @@ rng-oracle/
 │   ├── test/                 # Contract tests
 │   ├── hardhat.config.js
 │   └── package.json
-└── enclave/                  # TEE enclave service
-    ├── main.py               # FastAPI service entry point
-    ├── odyn.py               # Odyn API wrapper
-    ├── config.py             # Configuration
-    ├── abi.json              # Contract ABI
-    ├── requirements.txt      # Python dependencies
-    ├── Dockerfile            # Container build
-    └── README.md             # Enclave service docs
+├── enclave/                  # TEE enclave service
+│   ├── main.py               # FastAPI service entry point
+│   ├── odyn.py               # Odyn API wrapper
+│   ├── config.py             # Configuration
+│   ├── abi.json              # Contract ABI
+│   ├── consumer-dist/        # Built consumer frontend
+│   ├── requirements.txt      # Python dependencies
+│   ├── Dockerfile            # Container build
+│   └── README.md             # Enclave service docs
+└── consumer/                 # React frontend (Vite)
+    ├── src/                  # Source code
+    ├── dist/                 # Built files
+    ├── vite.config.js        # Vite config (base: /consumer/)
+    └── package.json
 ```
 
 ## Step 1: Deploy Smart Contract
@@ -158,7 +165,7 @@ Once funded and authorized, the enclave service will automatically start process
 |----------|--------|-------------|
 | `/` | GET | Service status and info |
 | `/request/{request_id}` | GET | Get request details |
-| `/attestation` | GET | Get TEE attestation document |
+| `/consumer` | - | Consumer frontend UI |
 
 ## Environment Variables
 
@@ -183,17 +190,19 @@ This section describes how to interact with a deployed RNG Oracle to request ran
 
 ## Using the Frontend
 
-A React-based frontend is available at [rng-oracle-frontend](../rng-oracle-frontend/).
+A React-based frontend is included in the `consumer/` directory.
 
 ### Quick Start
 
 ```bash
-cd ../rng-oracle-frontend
+cd consumer
 npm install
 npm run dev
 ```
 
 Open [http://localhost:5173](http://localhost:5173) in your browser.
+
+> **Note**: When deployed with the enclave, the frontend is available at `https://<your-app>/consumer`
 
 ### Steps to Request Random Numbers
 
@@ -239,11 +248,11 @@ Implement the `IRNGCallback` interface to receive random numbers in your own con
 
 ```solidity
 interface IRNGCallback {
-    function receiveRandomNumber(uint256 requestId, uint256[] calldata randomNumbers) external;
+    function onRandomNumberFulfilled(uint256 requestId, uint256[] calldata randomNumbers) external;
 }
 
 contract MyLottery is IRNGCallback {
-    function receiveRandomNumber(uint256 requestId, uint256[] calldata randomNumbers) external override {
+    function onRandomNumberFulfilled(uint256 requestId, uint256[] calldata randomNumbers) external override {
         // Use the random numbers
     }
 }

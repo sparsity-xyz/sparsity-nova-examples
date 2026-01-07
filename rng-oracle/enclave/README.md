@@ -19,8 +19,7 @@ This service runs inside an AWS Nitro Enclave and:
 | `abi.json` | RNG contract ABI |
 | `requirements.txt` | Python dependencies |
 | `Dockerfile` | Container build file |
-| `frontend/` | React-based RNG frontend UI |
-| `consumer/` | Simple consumer demo page |
+| `consumer-dist/` | Built consumer frontend (from consumer project) |
 
 ## Quick Start
 
@@ -56,8 +55,7 @@ The service starts on `http://0.0.0.0:8000`.
 |----------|--------|-------------|
 | `/` | GET | Service status, operator info, balance |
 | `/request/{request_id}` | GET | Get specific request details |
-| `/frontend` | - | React frontend for interacting with RNG contract |
-| `/consumer` | - | Simple consumer demo page |
+| `/consumer` | - | Consumer frontend UI |
 
 ## Service Status
 
@@ -77,8 +75,7 @@ Response:
     "operator_balance": 0.998857,
     "processed_requests": 0,
     "explorer": "https://sepolia.basescan.org/address/0x...",
-    "consumer": "http://localhost:8000/consumer",
-    "frontend": "http://localhost:8000/frontend"
+    "consumer": "http://localhost:8000/consumer"
 }
 ```
 
