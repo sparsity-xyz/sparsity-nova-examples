@@ -76,7 +76,7 @@ sequenceDiagram
 
     rect rgb(255, 245, 230)
         Note over Nova,Enclave: Phase 2: Deploy RNG Enclave
-        Owner->>Nova: Upload enclave app (contractAddress)
+        Owner->>Nova: Create enclave app (contractAddress)
         Nova->>Enclave: Build & deploy enclave
         Enclave-->>Enclave: Generate TEE wallet
         Enclave-->>Nova: Wallet address ready
