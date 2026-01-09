@@ -140,11 +140,3 @@ curl https://your-app.sparsity.cloud/
 |--------------------------------|------------------------------------|----------------------------------------------------------|
 | [rng-oracle](./rng-oracle)     | Verifiable random number generator | Hardware RNG, event-driven fulfillment, callback support |
 | [price-oracle](./price-oracle) | BTC price feed from CoinGecko      | External API integration, periodic updates               |
-
-## Best Practices
-
-1. **Error Handling** — Retry failed transactions, handle RPC timeouts
-2. **Gas Management** — Monitor TEE wallet balance, alert when low
-3. **Event Filtering** — Only process events for your contract
-4. **Logging** — Log all actions for debugging and auditing
-5. **Configuration** — Use environment variables for contract addresses and RPC URLs
