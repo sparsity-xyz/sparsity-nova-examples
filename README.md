@@ -4,14 +4,35 @@ This guide explains how to develop enclave applications for the Nova Platform.
 
 ## 1. Enclave Architecture
 
-On the Nova Platform, user applications run inside an AWS Nitro Enclave secure environment. **Odyn** is the enclave supervisor that runs alongside your application (the "entrypoint") within the same enclave.
+On the Nova Platform, user applications run inside an **AWS Nitro Enclave** — an isolated, hardware-secured environment.
 
-### Odyn's Main Responsibilities
+### The Challenge: Nitro Enclave Complexity
 
-- **Platform Initialization**: Bring up loopback networking, seed RNG from NSM (Nitro Secure Module)
-- **Infrastructure Services**: Provide ingress listeners, optional egress proxy, optional KMS proxy, and internal API server
-- **Application Supervision**: Launch and supervise your application process, handle process lifecycle and cleanup
-- **Logging & Status**: Capture and expose application logs and runtime status over VSOCK to the host
+Deploying applications directly to Nitro Enclaves is notoriously difficult:
+
+- **No standard networking** — Enclaves have no network interfaces; all communication must go through VSOCK, requiring custom proxy implementations
+- **No persistent storage** — Applications cannot access the host filesystem and must handle all state management carefully
+- **Limited entropy sources** — Standard `/dev/random` doesn't work; you must integrate with the Nitro Secure Module (NSM) for cryptographic randomness
+- **Complex attestation workflow** — Generating and verifying attestation documents requires deep understanding of NSM APIs and CBOR encoding
+- **Custom key management** — Secure key generation and storage inside the enclave requires significant cryptographic engineering
+- **Process supervision challenges** — No systemd or standard init systems; you must build your own process lifecycle management
+
+These challenges make enclave development inaccessible to most developers and significantly slow down time-to-production.
+
+### The Solution: Odyn
+
+**Odyn** is the enclave supervisor that runs alongside your application, abstracting away all enclave complexity. You write a normal web application; Odyn handles the rest.
+
+**What Odyn Does For You:**
+
+| Challenge | Odyn Solution |
+|-----------|---------------|
+| No networking | Provides HTTP ingress/egress proxies over VSOCK |
+| No entropy | Seeds RNG from NSM automatically |
+| Complex attestation | Simple REST API: `POST /v1/attestation` |
+| Key management | Built-in Ethereum wallet with signing APIs |
+| Process supervision | Launches, monitors, and restarts your app |
+| Logging | Captures stdout/stderr and exposes via VSOCK |
 
 ### Services Provided to Your Application
 
@@ -50,150 +71,18 @@ Base URL: http://localhost:18000
 
 ## 4. Odyn API Reference
 
-Below are the main API endpoints provided by Odyn:
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/v1/eth/address` | GET | Get enclave's Ethereum address and public key |
+| `/v1/eth/sign` | POST | Sign a message (EIP-191) with optional attestation |
+| `/v1/eth/sign-tx` | POST | Sign an Ethereum transaction |
+| `/v1/random` | GET | Get 32 cryptographically secure random bytes |
+| `/v1/attestation` | POST | Generate a hardware attestation document |
+| `/v1/encryption/public_key` | GET | Get enclave's encryption public key |
+| `/v1/encryption/encrypt` | POST | Encrypt data with client's public key |
+| `/v1/encryption/decrypt` | POST | Decrypt data sent to the enclave |
 
-### Get Ethereum Address
-
-```http
-GET /v1/eth/address
-```
-
-**Response:**
-```json
-{
-  "address": "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb",
-  "public_key": "0x04..."
-}
-```
-
-### Sign Message (EIP-191)
-
-```http
-POST /v1/eth/sign
-Content-Type: application/json
-
-{
-  "message": "hello world",
-  "include_attestation": false
-}
-```
-
-**Response:**
-```json
-{
-  "signature": "0x...",
-  "address": "0x...",
-  "attestation": null
-}
-```
-
-### Sign Transaction
-
-```http
-POST /v1/eth/sign-tx
-Content-Type: application/json
-
-{
-  "include_attestation": false,
-  "payload": {
-    "kind": "structured",
-    "chain_id": "0x1",
-    "nonce": "0x0",
-    "max_priority_fee_per_gas": "0x3b9aca00",
-    "max_fee_per_gas": "0x77359400",
-    "gas_limit": "0x5208",
-    "to": "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb",
-    "value": "0xde0b6b3a7640000",
-    "data": "0x",
-    "access_list": []
-  }
-}
-```
-
-### Get Random Bytes
-
-```http
-GET /v1/random
-```
-
-**Response:**
-```json
-{
-  "random_bytes": "0x..." // 32 bytes, hex-encoded
-}
-```
-
-### Generate Attestation
-
-```http
-POST /v1/attestation
-Content-Type: application/json
-
-{
-  "nonce": "base64_encoded_nonce",
-  "public_key": "PEM_encoded_public_key",
-  "user_data": "base64_encoded_user_data"
-}
-```
-
-Returns a CBOR-formatted Attestation document.
-
-### Get Encryption Public Key
-
-```http
-GET /v1/encryption/public_key
-```
-
-**Response:**
-```json
-{
-  "public_key_der": "0x3076...",
-  "public_key_pem": "-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----"
-}
-```
-
-### Decrypt Data
-
-```http
-POST /v1/encryption/decrypt
-Content-Type: application/json
-
-{
-  "nonce": "0x...",
-  "client_public_key": "0x...",
-  "encrypted_data": "0x..."
-}
-```
-
-**Response:**
-```json
-{
-  "plaintext": "decrypted string"
-}
-```
-
-### Encrypt Data
-
-```http
-POST /v1/encryption/encrypt
-Content-Type: application/json
-
-{
-  "plaintext": "string to encrypt",
-  "client_public_key": "0x..."
-}
-```
-
-**Response:**
-```json
-{
-  "encrypted_data": "...",
-  "enclave_public_key": "...",
-  "nonce": "..."
-}
-```
-
-> 📖 For complete API documentation, see: [Enclaver Internal API](https://github.com/sparsity-xyz/enclaver/blob/sparsity/docs/internal_api.md)
+> 📖 For complete API documentation with request/response examples, see: [Enclaver Internal API](https://github.com/sparsity-xyz/enclaver/blob/sparsity/docs/internal_api.md)
 
 ## 5. Mock Service (Development Environment)
 
