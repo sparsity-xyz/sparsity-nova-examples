@@ -65,43 +65,33 @@ CMD ["python", "main.py"]
 
 Inside the enclave, access Odyn's API service to use Nitro Enclave security features:
 
-```
-Base URL: http://localhost:18000
-```
+| Environment              | Base URL                           |
+|--------------------------|------------------------------------|
+| Production (in enclave)  | `http://localhost:18000`           |
+| Development (mock)       | `http://odyn.sparsity.cloud:18000` |
 
-## 4. Odyn API Reference
+### API Reference
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/v1/eth/address` | GET | Get enclave's Ethereum address and public key |
-| `/v1/eth/sign` | POST | Sign a message (EIP-191) with optional attestation |
-| `/v1/eth/sign-tx` | POST | Sign an Ethereum transaction |
-| `/v1/random` | GET | Get 32 cryptographically secure random bytes |
-| `/v1/attestation` | POST | Generate a hardware attestation document |
-| `/v1/encryption/public_key` | GET | Get enclave's encryption public key |
-| `/v1/encryption/encrypt` | POST | Encrypt data with client's public key |
-| `/v1/encryption/decrypt` | POST | Decrypt data sent to the enclave |
+| Endpoint                  | Method | Description                                  |
+|---------------------------|--------|----------------------------------------------|
+| `/v1/eth/address`         | GET    | Get enclave's Ethereum address and public key |
+| `/v1/eth/sign`            | POST   | Sign a message (EIP-191) with optional attestation |
+| `/v1/eth/sign-tx`         | POST   | Sign an Ethereum transaction                 |
+| `/v1/random`              | GET    | Get 32 cryptographically secure random bytes |
+| `/v1/attestation`         | POST   | Generate a hardware attestation document     |
+| `/v1/encryption/public_key` | GET  | Get enclave's encryption public key          |
+| `/v1/encryption/encrypt`  | POST   | Encrypt data with client's public key        |
+| `/v1/encryption/decrypt`  | POST   | Decrypt data sent to the enclave             |
 
 > 📖 For complete API documentation with request/response examples, see: [Enclaver Internal API](https://github.com/sparsity-xyz/enclaver/blob/sparsity/docs/internal_api.md)
 
-## 5. Mock Service (Development Environment)
+### Environment Configuration
 
-Since Odyn only works inside an actual enclave environment, we provide a **Mock Service** for local development and testing:
-
-```
-Mock Base URL: http://odyn.sparsity.cloud:18000
-```
-
-This mock service simulates all Odyn API endpoints, allowing developers to develop and debug outside the enclave environment.
-
-## 6. Best Practice: Environment Variable Configuration
-
-We recommend using the `IN_ENCLAVE` environment variable to distinguish between development and production environments:
+Use the `IN_ENCLAVE` environment variable to switch between development and production:
 
 ```python
 import os
 
-# Choose Odyn endpoint based on environment variable
 IN_ENCLAVE = os.getenv("IN_ENCLAVE", "false").lower() == "true"
 
 if IN_ENCLAVE:
@@ -110,21 +100,13 @@ else:
     ODYN_BASE_URL = "http://odyn.sparsity.cloud:18000"
 ```
 
-Set the default value in your Dockerfile:
+Set in your Dockerfile:
 
 ```dockerfile
-# Default to false during development
-ENV IN_ENCLAVE=false
-
-# When deployed to enclave, this will be set to true
+ENV IN_ENCLAVE=false  # Set to true in production
 ```
 
-| Environment | IN_ENCLAVE | Odyn Base URL |
-|-------------|------------|---------------|
-| Local Development/Testing | `false` | `http://odyn.sparsity.cloud:18000` |
-| Enclave Production | `true` | `http://localhost:18000` |
-
-## 7. Reference Implementation
+## 4. Reference Implementation
 
 Refer to the Odyn wrapper implementation in the `secured-chat-bot` example project:
 
@@ -155,7 +137,7 @@ random_bytes = odyn.get_random_bytes(16)
 attestation = odyn.get_attestation()
 ```
 
-## 8. Frontend Deployment
+## 5. Frontend Deployment
 
 Enclave applications typically run as API services. There are two approaches for frontend deployment:
 
