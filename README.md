@@ -20,12 +20,6 @@ On the Nova Platform, user applications run inside an AWS Nitro Enclave secure e
 - Hardware-level remote attestation
 - End-to-end encryption (ECDH + AES-256-GCM)
 
-### Design Goals
-
-- Reproducible startup order with clear dependencies between services
-- Small surface area for host control via VSOCK/API
-- Policy-driven egress allow list for safe outbound connectivity
-
 ## 2. Application Packaging and Deployment
 
 Your application needs to be packaged as a **Docker image**. During development, you can follow standard practices:
