@@ -1,155 +1,77 @@
-# Fully Secured Chat Bot
+# Secured Chat Bot
 
-A verifiable AI chat application running on the Sparsity Nova TEE platform with a pure static frontend.
+A verifiable AI chat application running on the Sparsity Nova TEE platform with end-to-end encryption.
+
+> 📖 **[Development Tutorial](./tutorial.md)** — Step-by-step guide to build and deploy this application.
 
 ## Architecture
 
 ```mermaid
-flowchart LR
-    subgraph Frontend["Static Frontend"]
-        UI[Chat UI] --> Crypto[WebCrypto]
-    end
-    
-    subgraph Enclave["TEE Enclave (Nova)"]
-        API[Flask API] --> Cache[API Key Cache]
-        API --> AI[AI Providers]
-        API --> Static[Static Files]
-    end
-    
-    Crypto <-->|"E2E Encrypted"| API
-```
-
-## Encryption Flow
-
-```mermaid
 sequenceDiagram
     participant F as Frontend
-    participant E as Enclave
+    participant E as TEE Enclave
+    participant AI as AI Provider
     
-    F->>E: POST /.well-known/attestation
-    E-->>F: public_key + attestation_doc
-    Note over F: Generate P-384 keypair<br/>Derive shared secret (ECDH)
-    F->>E: POST /set-api-key (encrypted)
-    F->>E: POST /talk (encrypted)
-    E-->>F: Encrypted response + signature
+    F->>E: GET /.well-known/attestation
+    E-->>F: Public Key + Attestation Doc
+    Note over F: Verify attestation, derive shared secret (ECDH)
+    F->>E: POST /set-api-key (AES-256-GCM encrypted)
+    F->>E: POST /talk (encrypted message)
+    E->>AI: Proxy to OpenAI
+    AI-->>E: Response
+    E-->>F: Encrypted + Signed response
 ```
 
-**Crypto specs:** P-384 ECDH → HKDF-SHA256 → AES-256-GCM (32-byte nonce)
-
+**Crypto specs:** P-384 ECDH → HKDF-SHA256 → AES-256-GCM
 
 ## Features
 
-| Feature | Description |
-|---------|-------------|
-| **E2E Encryption** | P-384 ECDH + AES-256-GCM |
-| **API Key Caching** | Set once, cached in enclave |
-| **Signed Responses** | ETH signature (EIP-191) |
-| **Static Frontend** | Served from enclave at `/frontend` |
-| **Multi-Model** | GPT-5.1, GPT-5, GPT-4.1, GPT-4o, GPT-4 |
-| **Verification Dialog** | View attestation, signatures, and full request/response details |
-
-## UI Features
-
-- **Model Selector**: Choose AI model from the header (GPT-5.1 default)
-- **Key Icon**: Click to view signature details on any response
-- **Shield Icon**: Click for full verification including attestation, request/response payloads
-- **Robot Avatar**: Visual indicator for enclave responses
+| Feature              | Description                                     |
+|----------------------|-------------------------------------------------|
+| **E2E Encryption**   | P-384 ECDH + AES-256-GCM, API keys never exposed |
+| **Signed Responses** | EIP-191 signature on every AI response          |
+| **Attestation**      | AWS Nitro attestation verifiable in browser     |
+| **Multi-Model**      | GPT-5.1, GPT-5, GPT-4.1, GPT-4o, GPT-4          |
 
 ## Quick Start
 
 ```bash
-# Enclave
-cd enclave
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt && python app.py
+# Backend (uses mock Odyn for local dev)
+cd enclave && pip install -r requirements.txt && python app.py
 
-# Frontend (for development)
+# Frontend (dev server)
 cd frontend && npm install && npm run dev
 ```
 
-## Local Development
-
-### Prerequisites
-
-- Python 3.10+
-- Node.js 18+
-- npm
-
-### 1. Setup Enclave Backend
-
-```bash
-cd enclave
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-### 2. Run Enclave Backend (Debug Mode)
-
-```bash
-source .venv/bin/activate
-FLASK_DEBUG=1 python app.py
-```
-
-### 3. Setup & Run Frontend (Dev Mode)
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-### 4. Access the Application
-
-| Service | URL | Description |
-|---------|-----|-------------|
-| Frontend (Dev) | http://localhost:3000/frontend | Next.js dev server |
-| Backend | http://localhost:8000 | Flask API |
-| Frontend (Static) | http://localhost:8000/frontend | Built frontend |
-| Health Check | http://localhost:8000/ | API status |
+| Service          | URL                                |
+|------------------|------------------------------------|
+| Frontend (Dev)   | http://localhost:3000/frontend     |
+| Backend API      | http://localhost:8000              |
+| Frontend (Built) | http://localhost:8000/frontend     |
 
 ## API Endpoints
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/` | GET | Health check (`api_key_available`, `frontend_available`) |
-| `/frontend` | GET | Static frontend files |
-| `/set-api-key` | POST | Set API key (encrypted) |
-| `/talk` | POST | Chat (encrypted) |
-| `/.well-known/attestation` | POST | Attestation (runtime) |
-
-## Build & Deploy Frontend to Enclave
-
-```bash
-# Build frontend
-cd frontend
-npm run build
-
-# Copy to enclave
-rm -rf ../enclave/frontend
-cp -r out ../enclave/frontend
-```
-
-The built frontend is served at `/frontend` by the enclave.
-
+| Endpoint                   | Method | Description                      |
+|----------------------------|--------|----------------------------------|
+| `/`                        | GET    | Health check                     |
+| `/frontend`                | GET    | Static frontend files            |
+| `/set-api-key`             | POST   | Set API key (encrypted)          |
+| `/talk`                    | POST   | Chat (encrypted)                 |
+| `/.well-known/attestation` | POST   | Get attestation + encryption key |
 
 ## Project Structure
 
 ```
 secured-chat-bot/
-├── enclave/           # TEE backend
-│   ├── app.py         # Flask + API key caching + static serving
-│   ├── odyn.py        # ECDH encryption
-│   ├── ai_models/     # OpenAI
-│   └── frontend/      # Built frontend (from npm run build)
-└── frontend/          # Next.js source
+├── enclave/           # Python Flask backend (runs in TEE)
+│   ├── app.py         # Main service
+│   ├── odyn.py        # TEE API wrapper
+│   └── Dockerfile
+└── frontend/          # Next.js frontend
     ├── src/lib/       # crypto.ts, attestation.ts
-    ├── src/components/# Chat.tsx, VerificationDialog.tsx
-    └── src/app/       # page.tsx, verify/
+    └── src/components/# Chat UI
 ```
 
-## Deploy
+## Deploy to Nova Platform
 
-**Enclave:** `enclaver build && enclaver push`
-
-**Frontend:** Built and bundled inside enclave (served at `/frontend`)
+See the **[Development Tutorial](./tutorial.md)** for detailed deployment instructions.
