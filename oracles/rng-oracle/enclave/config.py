@@ -4,7 +4,7 @@ from pathlib import Path
 
 class Config:
     RPC_URL = "https://base-sepolia-public.nodies.app"
-    CONTRACT_ADDRESS = "0x5a5De497725Da2751F743a0cC922cB8F91811c28"
+    CONTRACT_ADDRESS = "0xd5083A6e0006Eb9eF16c0b179f5ee486ef50cF9a"
 
     POLL_INTERVAL = 10  # second
     FROM_BLOCK = "latest"
