@@ -36,6 +36,8 @@ sequenceDiagram
 ```bash
 # 1. Deploy contract
 cd contract && npm install
+cp .env.example .env
+# edit .env
 npx hardhat run scripts/deploy-rng.js --network baseSepolia
 
 # 2. Run enclave service (local testing)
