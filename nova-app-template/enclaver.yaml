@@ -1,0 +1,35 @@
+version: v1
+name: "nova-app"
+target: "nova-app:latest"
+
+sources:
+  app: "nova-app-base:latest"
+
+# Odyn API for identity and attestation
+api:
+  listen_port: 8080
+
+# Ingress with RA-TLS support
+ingress:
+  - listen_port: 443
+    ratls: true
+    tls:
+      key_file: "server.key"
+      cert_file: "server.crt"
+
+# Egress for external API calls
+egress:
+  allow:
+    - "*.amazonaws.com"
+    - "*.base.org"
+
+# Encrypted state storage configuration
+storage:
+  s3_bucket: "your-bucket-name"
+  s3_region: "us-east-1"
+  s3_prefix: "nova-app-state"
+
+# Resource defaults
+defaults:
+  cpu_count: 2
+  memory_mb: 4096
