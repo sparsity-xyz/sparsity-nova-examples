@@ -25,15 +25,17 @@ Demo endpoints included:
     - POST /api/contract   → Write to contract (updateStateHash)
 """
 
+import json
+import logging
+import os
+import base64
+from typing import Optional, Dict, Any, TYPE_CHECKING
+
+import requests
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import Optional, Dict, Any
-import logging
-import json
-import os
 
 # Type hint for Odyn (actual import would cause circular dependency)
-from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from odyn import Odyn
 
@@ -121,7 +123,6 @@ def get_attestation(nonce: str = ""):
         raise HTTPException(status_code=500, detail="Odyn not initialized")
     
     try:
-        import base64
         attestation = odyn.get_attestation(nonce)
         return {"attestation": base64.b64encode(attestation).decode()}
     except Exception as e:
@@ -484,7 +485,6 @@ def get_oracle_price_tx():
     
     try:
         # 1. Fetch internet data
-        import requests
         res = requests.get(
             "https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd",
             timeout=10

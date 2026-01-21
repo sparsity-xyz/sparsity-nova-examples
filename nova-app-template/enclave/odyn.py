@@ -27,11 +27,12 @@ Environment:
     IN_ENCLAVE=false  → Uses mock API (development)
 """
 
-import os
-import json
-import requests
-from typing import Dict, Any, Optional, Tuple, List
 import base64
+import json
+import os
+from typing import Dict, Any, Optional, Tuple, List
+
+import requests
 
 
 class Odyn:

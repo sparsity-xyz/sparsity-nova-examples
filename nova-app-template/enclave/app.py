@@ -27,25 +27,22 @@ Architecture:
 """
 
 import logging
-import os
+import json
+import json
 from pathlib import Path
 from typing import Optional
+
+import uvicorn
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from apscheduler.schedulers.background import BackgroundScheduler
 
-# =============================================================================
-# Platform Components (provided by Nova)
-# =============================================================================
+# Platform & User Components
 from odyn import Odyn
-
-# =============================================================================
-# User-Defined Modules (modify these for your application)
-# =============================================================================
-import tasks   # Background jobs
-import routes  # API endpoints
+import tasks
+import routes
 
 # =============================================================================
 # Logging Configuration
@@ -152,7 +149,6 @@ def startup_event():
     
     # 3. Load persisted state from S3
     try:
-        import json
         data_bytes = odyn.s3_get("app_state.json")
         if data_bytes:
             app_state["data"] = json.loads(data_bytes.decode('utf-8'))
@@ -178,7 +174,6 @@ def shutdown_event():
 # Development Entry Point
 # =============================================================================
 if __name__ == "__main__":
-    import uvicorn
     # This port must match the "App Listening Port" value entered when 
     # creating the app on the Nova platform。
     # If you specify ingress.listen_port in enclaver.yaml, it can be detected by nova platform automatically.

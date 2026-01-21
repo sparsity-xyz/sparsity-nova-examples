@@ -22,16 +22,16 @@ Example use cases:
     - Scheduled on-chain transactions
 """
 
-import os
 import json
-import hashlib
 import logging
-import requests
+import os
 from datetime import datetime
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
+
+import requests
+from eth_hash.auto import keccak
 
 # Type hint for Odyn (actual import would cause circular dependency)
-from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from odyn import Odyn
 
@@ -72,10 +72,9 @@ def init(state_ref: dict, odyn_ref: "Odyn"):
 # =============================================================================
 
 def compute_state_hash(data: dict) -> str:
-    """Compute keccak256 hash of state data."""
+    """Compute keccak256 hash of state data for on-chain compatibility."""
     json_bytes = json.dumps(data, sort_keys=True).encode('utf-8')
-    # Using SHA256 as a simple alternative; for real keccak256 use web3.py
-    return "0x" + hashlib.sha256(json_bytes).hexdigest()
+    return "0x" + keccak(json_bytes).hex()
 
 
 def fetch_external_data() -> Optional[dict]:

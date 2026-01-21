@@ -6,6 +6,7 @@
  */
 
 import * as secp256k1 from '@noble/secp256k1';
+
 import { fetchAttestation, hexToBytes } from './attestation';
 
 export interface EncryptedPayload {
@@ -203,7 +204,9 @@ export class EnclaveClient {
             {
                 name: 'HKDF',
                 hash: 'SHA-256',
-                salt: new Uint8Array(0),
+                // Security: Using a non-empty salt protects against scenarios where the input 
+                // key material (shared secret) might have low entropy or be reused.
+                salt: new TextEncoder().encode('Nova-RATLS-v1'),
                 info: new TextEncoder().encode('encryption data')
             },
             hkdfKey,

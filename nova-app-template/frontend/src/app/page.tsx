@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
+
 import { EnclaveClient } from '@/lib/crypto';
 
 interface ConnectionStatus {
@@ -303,7 +304,7 @@ export default function Home() {
                                             </span>
                                         </div>
                                         <div className="bg-slate-900 p-4 rounded-xl border border-slate-700">
-                                            <label className="text-xs text-slate-500 block mb-1">State Hash (SHA256)</label>
+                                            <label className="text-xs text-slate-500 block mb-1">State Hash (Keccak256)</label>
                                             <span className="text-sm font-mono text-blue-400 italic truncate block">
                                                 {status.connected && response?.data?.last_state_hash
                                                     ? `0x${response.data.last_state_hash.slice(0, 16)}...`
