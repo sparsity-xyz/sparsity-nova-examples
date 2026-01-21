@@ -5,29 +5,35 @@ target: "nova-app:latest"
 sources:
   app: "nova-app-base:latest"
 
-# Odyn API for identity and attestation
+# Odyn Primary API (full functionality)
 api:
-  listen_port: 8080
+  listen_port: 18000
 
-# Ingress with RA-TLS support
+# Odyn Auxiliary API (restricted, for sidecars)
+aux_api:
+  listen_port: 18001
+
+# Application ingress - listen_port must match the "App Listening Port" 
+# specified when creating the app on the Nova platform.
 ingress:
-  - listen_port: 443
-    ratls: true
-    tls:
-      key_file: "server.key"
-      cert_file: "server.crt"
+  - listen_port: 8000
 
 # Egress for external API calls
+# NOTE: Nova platform manages this automatically for you.
 egress:
   allow:
-    - "*.amazonaws.com"
-    - "*.base.org"
+    - "**"           # All domains
+    - "0.0.0.0/0"    # All IPv4
+    - "::/0"         # All IPv6
 
-# Encrypted state storage configuration
+# S3 persistent storage
+# NOTE: Nova platform provisions and manages these values during deployment.
 storage:
-  s3_bucket: "your-bucket-name"
-  s3_region: "us-east-1"
-  s3_prefix: "nova-app-state"
+  s3:
+    enabled: true
+    bucket: "your-bucket-name"
+    prefix: "apps/your-app-id/"
+    region: "us-east-1"
 
 # Resource defaults
 defaults:

@@ -86,6 +86,115 @@ class ContractWriteRequest(BaseModel):
     """Request to update state hash on contract."""
     state_hash: str  # bytes32 as hex string
 
+class SignMessageRequest(BaseModel):
+    """Request to sign a message."""
+    message: str
+    include_attestation: bool = False
+
+class EncryptRequest(BaseModel):
+    """Request to encrypt data for client."""
+    plaintext: str
+    client_public_key: str  # Hex-encoded DER public key
+
+class DecryptRequest(BaseModel):
+    """Request to decrypt data from client."""
+    nonce: str
+    client_public_key: str
+    encrypted_data: str
+
+
+# =============================================================================
+# TEE Identity & Cryptography Endpoints
+# =============================================================================
+
+@router.get("/attestation")
+def get_attestation(nonce: str = ""):
+    """
+    Get a Nitro attestation document.
+    
+    The attestation proves this code is running in a genuine
+    AWS Nitro Enclave with specific PCR measurements.
+    
+    Returns: CBOR-encoded attestation document (base64)
+    """
+    if not odyn:
+        raise HTTPException(status_code=500, detail="Odyn not initialized")
+    
+    try:
+        import base64
+        attestation = odyn.get_attestation(nonce)
+        return {"attestation": base64.b64encode(attestation).decode()}
+    except Exception as e:
+        logger.error(f"Failed to get attestation: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/sign")
+def sign_message(req: SignMessageRequest):
+    """
+    Sign a message using EIP-191 personal message prefix.
+    
+    The signature proves the message was signed by the TEE's
+    hardware-seeded private key.
+    """
+    if not odyn:
+        raise HTTPException(status_code=500, detail="Odyn not initialized")
+    
+    try:
+        result = odyn.sign_message(req.message, req.include_attestation)
+        return result
+    except Exception as e:
+        logger.error(f"Failed to sign message: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/encryption/public_key")
+def get_encryption_public_key():
+    """
+    Get the enclave's P-384 public key for ECDH-based encryption.
+    
+    Use this to establish an encrypted channel with the TEE.
+    """
+    if not odyn:
+        raise HTTPException(status_code=500, detail="Odyn not initialized")
+    
+    try:
+        return odyn.get_encryption_public_key()
+    except Exception as e:
+        logger.error(f"Failed to get encryption public key: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/encrypt")
+def encrypt_data(req: EncryptRequest):
+    """
+    Encrypt data to send to a client using ECDH + AES-256-GCM.
+    """
+    if not odyn:
+        raise HTTPException(status_code=500, detail="Odyn not initialized")
+    
+    try:
+        return odyn.encrypt(req.plaintext, req.client_public_key)
+    except Exception as e:
+        logger.error(f"Failed to encrypt: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/decrypt")
+def decrypt_data(req: DecryptRequest):
+    """
+    Decrypt data sent from a client using ECDH + AES-256-GCM.
+    """
+    if not odyn:
+        raise HTTPException(status_code=500, detail="Odyn not initialized")
+    
+    try:
+        plaintext = odyn.decrypt(req.nonce, req.client_public_key, req.encrypted_data)
+        return {"plaintext": plaintext}
+    except Exception as e:
+        logger.error(f"Failed to decrypt: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 # =============================================================================
 # Demo Endpoints
@@ -354,6 +463,63 @@ def update_contract_state(req: ContractWriteRequest):
         }
     except Exception as e:
         logger.error(f"Failed to sign transaction: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# Oracle Demo (Internet to Chain)
+# =============================================================================
+
+@router.get("/oracle/price")
+def get_oracle_price_tx():
+    """
+    Oracle Demo: Fetch internet data and sign an on-chain update.
+    
+    1. Fetches ETH price from Coingecko API
+    2. Encodes updatePrice(uint256) transaction
+    3. Signs transaction with TEE key
+    """
+    if not odyn:
+        raise HTTPException(status_code=500, detail="Odyn not initialized")
+    
+    try:
+        # 1. Fetch internet data
+        import requests
+        res = requests.get(
+            "https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd",
+            timeout=10
+        )
+        res.raise_for_status()
+        price = int(res.json()["ethereum"]["usd"])
+        
+        # 2. Encode transaction (simple example)
+        # updatePrice(uint256) -> 0x91b702ec
+        function_selector = "0x91b702ec"
+        price_hex = hex(price).replace("0x", "").zfill(64)
+        call_data = f"{function_selector}{price_hex}"
+        
+        # 3. Sign transaction
+        tx = {
+            "kind": "structured",
+            "chain_id": hex(CHAIN_ID),
+            "nonce": "0x0", 
+            "max_priority_fee_per_gas": "0x5F5E100",
+            "max_fee_per_gas": "0xB2D05E00",
+            "gas_limit": "0x30D40",
+            "to": CONTRACT_ADDRESS or "0x0000000000000000000000000000000000000000",
+            "value": "0x0",
+            "data": call_data
+        }
+        
+        signed = odyn.sign_tx(tx)
+        
+        return {
+            "price_usd": price,
+            "transaction": signed,
+            "note": "This transaction was signed by the TEE after fetching real-time internet data."
+        }
+    except Exception as e:
+        logger.error(f"Oracle demo failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

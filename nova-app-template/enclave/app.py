@@ -99,6 +99,7 @@ class AppStatus(BaseModel):
     status: str
     eth_address: Optional[str] = None
     cron_info: Optional[dict] = None
+    last_state_hash: Optional[str] = None
 
 @app.get("/health")
 def health_check():
@@ -116,7 +117,8 @@ def get_status():
             cron_info={
                 "counter": app_state["cron_counter"],
                 "last_run": app_state["last_cron_run"]
-            }
+            },
+            last_state_hash=app_state["data"].get("last_state_hash")
         )
     except Exception as e:
         return AppStatus(status=f"degraded: {e}")
@@ -148,11 +150,12 @@ def startup_event():
     # 2. Register user routes (prefix: /api)
     app.include_router(routes.router)
     
-    # 3. Load persisted state from encrypted S3
+    # 3. Load persisted state from S3
     try:
-        data = odyn.load_state("app_state.json")
-        if data:
-            app_state["data"] = data
+        import json
+        data_bytes = odyn.s3_get("app_state.json")
+        if data_bytes:
+            app_state["data"] = json.loads(data_bytes.decode('utf-8'))
             logger.info("State loaded from S3")
         else:
             logger.info("No previous state found, starting fresh")
@@ -176,4 +179,8 @@ def shutdown_event():
 # =============================================================================
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=5000)
+    # This port must match the "App Listening Port" value entered when 
+    # creating the app on the Nova platform。
+    # If you specify ingress.listen_port in enclaver.yaml, it can be detected by nova platform automatically.
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+

@@ -44,7 +44,7 @@ class Odyn:
     """
     
     # Mock API for local development (when not running in TEE)
-    DEFAULT_MOCK_ODYN_API = "http://odyn.sparsity.cloud:8080"
+    DEFAULT_MOCK_ODYN_API = "http://odyn.sparsity.cloud:18000"
     
     def __init__(self, endpoint: Optional[str] = None):
         """
@@ -59,7 +59,7 @@ class Odyn:
         else:
             # IN_ENCLAVE is set by the Dockerfile/enclaver runtime
             is_enclave = os.getenv("IN_ENCLAVE", "False").lower() == "true"
-            self.endpoint = "http://localhost:8080" if is_enclave else self.DEFAULT_MOCK_ODYN_API
+            self.endpoint = "http://localhost:18000" if is_enclave else self.DEFAULT_MOCK_ODYN_API
 
     def _call(self, method: str, path: str, payload: Any = None) -> Any:
         """Internal helper for making API calls."""
@@ -99,6 +99,20 @@ class Odyn:
         """
         return self._call("POST", "/v1/eth/sign-tx", {"payload": tx})
 
+    def sign_message(self, message: str, include_attestation: bool = False) -> dict:
+        """
+        Sign a plain-text message using EIP-191 personal message prefix.
+        
+        Args:
+            message: Plain-text message to sign (must be non-empty)
+            include_attestation: Whether to include attestation in response
+            
+        Returns:
+            Dict with signature, address, and optionally attestation
+        """
+        payload = {"message": message, "include_attestation": include_attestation}
+        return self._call("POST", "/v1/eth/sign", payload)
+
     # =========================================================================
     # Randomness & Attestation
     # =========================================================================
@@ -133,6 +147,52 @@ class Odyn:
         res = requests.post(url, json={"nonce": nonce}, timeout=10)
         res.raise_for_status()
         return res.content
+
+    # =========================================================================
+    # Encryption (ECDH + AES-256-GCM)
+    # =========================================================================
+    
+    def get_encryption_public_key(self) -> dict:
+        """
+        Get the enclave's P-384 public key for ECDH-based encryption.
+        
+        Returns:
+            Dict with public_key_der (hex) and public_key_pem (PEM format)
+        """
+        return self._call("GET", "/v1/encryption/public_key")
+
+    def encrypt(self, plaintext: str, client_public_key: str) -> dict:
+        """
+        Encrypt data to send to a client using ECDH + AES-256-GCM.
+        
+        Args:
+            plaintext: String to encrypt
+            client_public_key: Hex-encoded DER public key from client
+            
+        Returns:
+            Dict with encrypted_data, enclave_public_key, and nonce
+        """
+        payload = {"plaintext": plaintext, "client_public_key": client_public_key}
+        return self._call("POST", "/v1/encryption/encrypt", payload)
+
+    def decrypt(self, nonce: str, client_public_key: str, encrypted_data: str) -> str:
+        """
+        Decrypt data sent from a client using ECDH + AES-256-GCM.
+        
+        Args:
+            nonce: Hex-encoded nonce (at least 12 bytes)
+            client_public_key: Hex-encoded DER public key from client
+            encrypted_data: Hex-encoded ciphertext with auth tag
+            
+        Returns:
+            Decrypted plaintext string
+        """
+        payload = {
+            "nonce": nonce,
+            "client_public_key": client_public_key,
+            "encrypted_data": encrypted_data
+        }
+        return self._call("POST", "/v1/encryption/decrypt", payload)["plaintext"]
 
     # =========================================================================
     # S3 Storage (via Enclaver internal API)
@@ -200,39 +260,6 @@ class Odyn:
         res = requests.post(f"{self.endpoint}/v1/s3/list", json={"prefix": prefix}, timeout=30)
         res.raise_for_status()
         return res.json().get("keys", [])
-    
-    # =========================================================================
-    # Convenience Methods (JSON state helpers)
-    # =========================================================================
-    
-    def save_state(self, data: Any, key: str = "state.json") -> bool:
-        """
-        Convenience method to save JSON-serializable state to S3.
-        
-        Args:
-            data: JSON-serializable data to persist
-            key: Storage key (default: "state.json")
-            
-        Returns:
-            True if successful
-        """
-        json_bytes = json.dumps(data).encode('utf-8')
-        return self.s3_put(key, json_bytes)
-    
-    def load_state(self, key: str = "state.json") -> Optional[Any]:
-        """
-        Convenience method to load JSON state from S3.
-        
-        Args:
-            key: Storage key (default: "state.json")
-            
-        Returns:
-            Parsed JSON data, or None if key doesn't exist
-        """
-        data = self.s3_get(key)
-        if data is None:
-            return None
-        return json.loads(data.decode('utf-8'))
 
 
 # =============================================================================
@@ -245,4 +272,5 @@ if __name__ == "__main__":
         print(f"TEE Address: {o.eth_address()}")
     except Exception as e:
         print(f"Could not connect to Odyn: {e}")
+
 

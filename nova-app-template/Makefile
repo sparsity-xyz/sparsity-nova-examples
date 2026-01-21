@@ -65,7 +65,7 @@ docker-build: build-frontend
 
 ## Run Docker container locally
 docker-run:
-	docker run -p 5000:5000 nova-app:latest
+	docker run -p 8000:8000 nova-app:latest
 
 # =============================================================================
 # Cleanup
@@ -94,7 +94,7 @@ help:
 	@echo ""
 	@echo "Enclave:"
 	@echo "  make install-enclave   Install enclave Python dependencies"
-	@echo "  make dev-enclave       Start enclave dev server (port 5000)"
+	@echo "  make dev-enclave       Start enclave dev server (port 8000)"
 	@echo ""
 	@echo "Docker:"
 	@echo "  make docker-build      Build Docker image (includes frontend)"
