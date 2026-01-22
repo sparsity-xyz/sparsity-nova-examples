@@ -33,6 +33,14 @@ import requests
 from eth_hash.auto import keccak
 
 from chain import compute_state_hash, sign_update_state_hash, sign_update_eth_price
+from config import (
+    RPC_URL,
+    CONTRACT_ADDRESS,
+    CHAIN_ID,
+    BROADCAST_TX,
+    ORACLE_PRICE_UPDATE_MINUTES,
+    ORACLE_EVENT_POLL_LOOKBACK_BLOCKS,
+)
 
 # Type hint for Odyn (actual import would cause circular dependency)
 if TYPE_CHECKING:
@@ -49,18 +57,7 @@ odyn: Optional["Odyn"] = None
 # =============================================================================
 # Configuration (set via environment variables)
 # =============================================================================
-RPC_URL = os.getenv("RPC_URL", "https://sepolia.base.org")
-CONTRACT_ADDRESS = os.getenv("CONTRACT_ADDRESS", "")
-APP_CONTRACT_ADDRESS = os.getenv("APP_CONTRACT_ADDRESS", "")
-CHAIN_ID = int(os.getenv("CHAIN_ID", "84532"))  # Base Sepolia
-BROADCAST_TX = os.getenv("BROADCAST_TX", "false").lower() == "true"
-
-ORACLE_PRICE_UPDATE_MINUTES = int(os.getenv("ORACLE_PRICE_UPDATE_MINUTES", "15"))
-ORACLE_EVENT_POLL_LOOKBACK_BLOCKS = int(os.getenv("ORACLE_EVENT_POLL_LOOKBACK_BLOCKS", "1000"))
-
-
-if not CONTRACT_ADDRESS and APP_CONTRACT_ADDRESS:
-    CONTRACT_ADDRESS = APP_CONTRACT_ADDRESS
+# See config.py for all configuration sources and defaults.
 
 
 def init(state_ref: dict, odyn_ref: "Odyn"):

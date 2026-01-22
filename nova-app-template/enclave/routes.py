@@ -39,6 +39,7 @@ from pydantic import BaseModel
 
 from chain import compute_state_hash, sign_update_state_hash
 from chain import sign_update_eth_price
+from config import CONTRACT_ADDRESS, RPC_URL, CHAIN_ID, BROADCAST_TX, ANCHOR_ON_WRITE
 
 # Type hint for Odyn (actual import would cause circular dependency)
 if TYPE_CHECKING:
@@ -462,15 +463,7 @@ def delete_from_storage(key: str):
 # =============================================================================
 
 # Contract configuration (set via environment variables)
-CONTRACT_ADDRESS = os.getenv("CONTRACT_ADDRESS", "")
-APP_CONTRACT_ADDRESS = os.getenv("APP_CONTRACT_ADDRESS", "")
-RPC_URL = os.getenv("RPC_URL", "https://sepolia.base.org")
-CHAIN_ID = int(os.getenv("CHAIN_ID", "84532"))  # Base Sepolia
-BROADCAST_TX = os.getenv("BROADCAST_TX", "false").lower() == "true"
-ANCHOR_ON_WRITE = os.getenv("ANCHOR_ON_WRITE", "true").lower() == "true"
-
-if not CONTRACT_ADDRESS and APP_CONTRACT_ADDRESS:
-    CONTRACT_ADDRESS = APP_CONTRACT_ADDRESS
+# See config.py for all configuration sources and defaults.
 
 
 @router.get("/contract")

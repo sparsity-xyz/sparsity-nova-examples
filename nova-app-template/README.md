@@ -126,8 +126,10 @@ Default endpoints:
 ### Deploy to Nova
 1. Create an App in the Nova Console
 2. Set App Listening Port = 8000
-3. Provide the contract address (NovaAppBase or your custom contract)
+3. Configure the contract address (NovaAppBase/ETHPriceOracleApp or your custom contract)
 4. The platform injects S3 / Egress / RA-TLS configuration at runtime
+
+For this template, the app contract address is configured in [enclave/config.py](enclave/config.py).
 
 ---
 
@@ -138,8 +140,8 @@ Default endpoints:
 | `IN_ENCLAVE` | false | Run inside a real enclave |
 | `RPC_URL` | https://sepolia.base.org | JSON-RPC endpoint |
 | `CHAIN_ID` | 84532 | Chain ID (Base Sepolia) |
-| `CONTRACT_ADDRESS` | (empty) | NovaAppBase contract address |
-| `APP_CONTRACT_ADDRESS` | (empty) | Alias for `CONTRACT_ADDRESS` (app contract address) |
+| `CONTRACT_ADDRESS` | (empty) | Legacy (not used if you configure `enclave/config.py`) |
+| `APP_CONTRACT_ADDRESS` | (empty) | Legacy alias (not used if you configure `enclave/config.py`) |
 | `BROADCAST_TX` | false | Auto-broadcast signed transactions |
 | `ANCHOR_ON_WRITE` | true | Anchor state hash on writes |
 | `CORS_ORIGINS` | * | Allowed CORS origins (comma-separated or *) |

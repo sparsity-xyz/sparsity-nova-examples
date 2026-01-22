@@ -44,6 +44,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from odyn import Odyn
 import tasks
 import routes
+import config
 
 # =============================================================================
 # Logging Configuration
@@ -134,15 +135,10 @@ def get_status():
     """Get TEE identity and cron status."""
     try:
         address = odyn.eth_address()
-
-        contract_address = os.getenv("CONTRACT_ADDRESS", "")
-        if not contract_address:
-            contract_address = os.getenv("APP_CONTRACT_ADDRESS", "")
-
         return AppStatus(
             status="running",
             eth_address=address,
-            contract_address=contract_address or None,
+            contract_address=config.CONTRACT_ADDRESS or None,
             cron_info={
                 "counter": app_state["cron_counter"],
                 "last_run": app_state["last_cron_run"]
