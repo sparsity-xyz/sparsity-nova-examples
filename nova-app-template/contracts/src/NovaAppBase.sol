@@ -1,14 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 pragma solidity ^0.8.20;
 
+import "./ISparsityApp.sol";
+
 /**
  * @title NovaAppBase
  * @dev Base contract for Nova TEE applications with on-chain state verification.
  *
  * This contract stores the hash of the encrypted application state,
  * allowing external verification that the TEE's state matches on-chain expectations.
+ * It implements ISparsityApp so the Nova Registry can register the TEE wallet.
  */
-contract NovaAppBase {
+contract NovaAppBase is ISparsityApp {
     /// @notice The keccak256 hash of the current encrypted state blob
     bytes32 public stateHash;
 
@@ -17,6 +20,9 @@ contract NovaAppBase {
 
     /// @notice The TEE wallet address (from Odyn /v1/eth/address)
     address public teeWalletAddress;
+
+    /// @notice Nova Registry contract authorized to register the TEE wallet
+    address public novaRegistry;
 
     /// @notice Contract owner for administrative functions
     address public owner;
@@ -29,6 +35,9 @@ contract NovaAppBase {
 
     /// @notice Emitted when TEE wallet is registered
     event TeeWalletRegistered(address indexed wallet);
+
+    /// @notice Emitted when Nova Registry is set
+    event NovaRegistrySet(address indexed registry);
 
     /// @notice Emitted when ownership is transferred
     event OwnershipTransferred(
@@ -49,24 +58,40 @@ contract NovaAppBase {
         _;
     }
 
+    modifier onlyRegistry() {
+        require(msg.sender == novaRegistry, "NovaAppBase: caller is not registry");
+        _;
+    }
+
     constructor() {
         owner = msg.sender;
     }
 
     /**
-     * @notice Register the TEE wallet address
-     * @param _teeWallet The Ethereum address from the TEE's Odyn API
-     * @dev Can only be called once by the owner
+     * @notice Set the Nova Registry contract address
+     * @param _registry The Nova Registry contract address
+     * @dev Only owner can set/update registry address
      */
-    function registerTeeWallet(address _teeWallet) external onlyOwner {
+    function setNovaRegistry(address _registry) external onlyOwner {
+        require(_registry != address(0), "NovaAppBase: invalid registry");
+        novaRegistry = _registry;
+        emit NovaRegistrySet(_registry);
+    }
+
+    /**
+     * @notice Register the TEE wallet address
+     * @param teeWalletAddress_ The Ethereum address from the TEE's Odyn API
+     * @dev Can only be called once by the Nova Registry
+     */
+    function registerTEEWallet(address teeWalletAddress_) external override onlyRegistry {
         require(
             teeWalletAddress == address(0),
             "NovaAppBase: TEE wallet already registered"
         );
-        require(_teeWallet != address(0), "NovaAppBase: invalid TEE wallet");
+        require(teeWalletAddress_ != address(0), "NovaAppBase: invalid TEE wallet");
 
-        teeWalletAddress = _teeWallet;
-        emit TeeWalletRegistered(_teeWallet);
+        teeWalletAddress = teeWalletAddress_;
+        emit TeeWalletRegistered(teeWalletAddress_);
     }
 
     /**

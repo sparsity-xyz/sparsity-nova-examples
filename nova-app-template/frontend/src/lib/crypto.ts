@@ -7,7 +7,7 @@
 
 import * as secp256k1 from '@noble/secp256k1';
 
-import { fetchAttestation, hexToBytes } from './attestation';
+import { fetchAttestation, hexToBytes, type DecodedAttestation } from './attestation';
 
 export interface EncryptedPayload {
     nonce: string;      // hex-encoded 32 bytes
@@ -15,10 +15,73 @@ export interface EncryptedPayload {
     data: string;       // hex-encoded encrypted data
 }
 
+export interface EncryptedCallTrace {
+    endpoint: string;
+    url: string;
+    curve: 'P-384' | 'secp256k1';
+    server_encryption_public_key: string; // hex DER (no 0x)
+    request: {
+        plaintext: string;
+        encrypted_payload: EncryptedPayload;
+    };
+    response: {
+        ok: boolean;
+        status: number;
+        statusText: string;
+        body_text?: string;
+        json?: any;
+        decrypted_plaintext?: string;
+        decrypted_json?: any;
+    };
+    error?: string;
+}
+
+export type EncryptedCallResult<T = any> = {
+    data?: T;
+    trace: EncryptedCallTrace;
+};
+
+export interface RATLSConnectTrace {
+    baseUrl: string;
+    steps: Array<{
+        name: string;
+        ok: boolean;
+        startedAt: number;
+        endedAt: number;
+        detail?: any;
+        error?: string;
+    }>;
+    attestation?: {
+        url: string;
+        http?: { ok: boolean; status: number; statusText: string; contentType?: string };
+        decoded?: {
+            module_id?: string;
+            timestamp?: number;
+            pcr_count?: number;
+            public_key?: string;
+        };
+    };
+    encryptionPublicKey?: {
+        url: string;
+        public_key_der?: string;
+        curve?: 'P-384' | 'secp256k1';
+    };
+    client?: {
+        curve?: 'P-384' | 'secp256k1';
+        client_public_key_der_len?: number;
+    };
+}
+
 export interface AttestationDoc {
     attestation_doc: string;  // Base64-encoded CBOR attestation
     public_key: string;       // hex-encoded DER public key
 }
+
+export type FetchedAttestation = DecodedAttestation & {
+    raw_doc: string; // Base64-encoded CBOR attestation
+    attestation_doc: string; // Same as raw_doc (kept for backwards compatibility)
+    public_key: string; // hex-encoded DER public key
+};
 
 // Convert ArrayBuffer to hex string
 function bufferToHex(buffer: ArrayBuffer | Uint8Array): string {
@@ -94,6 +157,13 @@ export class EnclaveClient {
     private isConnected: boolean = false;
     private curve: CurveType = 'P-384';
 
+    // Hex-encoded DER public key returned by /api/encryption/public_key (no 0x prefix)
+    private serverEncryptionPublicKeyDerHex: string = '';
+
+    get serverEncryptionPublicKey() {
+        return this.serverEncryptionPublicKeyDerHex;
+    }
+
     // P-384 keys (WebCrypto)
     private p384KeyPair: CryptoKeyPair | null = null;
     private serverP384Key: CryptoKey | null = null;
@@ -111,6 +181,18 @@ export class EnclaveClient {
         return this.isConnected;
     }
 
+    constructor() {
+        // Bind methods so they remain safe if passed around as callbacks.
+        // This prevents runtime errors like: "Cannot read properties of undefined (reading 'call')".
+        this.call = this.call.bind(this);
+        this.callEncrypted = this.callEncrypted.bind(this);
+        this.callEncryptedTrace = this.callEncryptedTrace.bind(this);
+        this.connect = this.connect.bind(this);
+        this.connectWithTrace = this.connectWithTrace.bind(this);
+        this.fetchAttestation = this.fetchAttestation.bind(this);
+        this.checkHealth = this.checkHealth.bind(this);
+    }
+
     /**
      * Connect to enclave and establish ECDH key exchange.
      * Fetches attestation and generates ephemeral key pair.
@@ -119,7 +201,25 @@ export class EnclaveClient {
         this.enclaveBaseUrl = baseUrl.replace(/\/$/, '');
 
         const attestation = await this.fetchAttestation();
-        this.curve = detectCurve(attestation.public_key);
+
+        // RA-TLS: the enclave encryption public key is embedded in the attestation document.
+        // Use it directly to avoid an extra network call.
+        const encryptionPublicKey = ((attestation as any).public_key || '').replace(/^0x/, '');
+        if (!encryptionPublicKey) {
+            // Fallback for older/non-standard attestation responses.
+            const encKey = await this.call<{ public_key_der?: string; public_key_pem?: string }>(
+                '/api/encryption/public_key',
+                'GET'
+            );
+            const fallback = (encKey.public_key_der || '').replace(/^0x/, '');
+            if (!fallback) throw new Error('Failed to retrieve enclave encryption public key');
+            this.serverEncryptionPublicKeyDerHex = fallback;
+            (attestation as any).public_key = fallback;
+            this.curve = detectCurve(fallback);
+        } else {
+            this.serverEncryptionPublicKeyDerHex = encryptionPublicKey;
+            this.curve = detectCurve(encryptionPublicKey);
+        }
 
         console.log(`[EnclaveClient] Detected curve: ${this.curve}`);
 
@@ -130,7 +230,7 @@ export class EnclaveClient {
                 ['deriveBits']
             );
 
-            const serverPubKeyDer = hexToBytes(attestation.public_key);
+            const serverPubKeyDer = hexToBytes(this.serverEncryptionPublicKeyDerHex);
             const serverPubKeyRaw = derToRaw(serverPubKeyDer, 'P-384');
 
             this.serverP384Key = await crypto.subtle.importKey(
@@ -144,7 +244,7 @@ export class EnclaveClient {
             this.secpPrivKey = secp256k1.utils.randomSecretKey();
             this.secpPubKey = secp256k1.getPublicKey(this.secpPrivKey, false);
 
-            const serverPubKeyDer = hexToBytes(attestation.public_key);
+            const serverPubKeyDer = hexToBytes(this.serverEncryptionPublicKeyDerHex);
             this.serverSecpPubKeyRaw = derToRaw(serverPubKeyDer, 'secp256k1');
 
             try {
@@ -160,16 +260,140 @@ export class EnclaveClient {
     }
 
     /**
+     * Connect to enclave and return a detailed trace of the RA-TLS establishment process.
+     * This is intended for UI/debugging.
+     */
+    async connectWithTrace(baseUrl: string): Promise<{ attestation: AttestationDoc; trace: RATLSConnectTrace }> {
+        const trace: RATLSConnectTrace = { baseUrl, steps: [] };
+
+        const step = async <T>(name: string, fn: () => Promise<T>, detail?: any): Promise<T> => {
+            const startedAt = Date.now();
+            try {
+                const result = await fn();
+                trace.steps.push({ name, ok: true, startedAt, endedAt: Date.now(), detail });
+                return result;
+            } catch (e) {
+                trace.steps.push({
+                    name,
+                    ok: false,
+                    startedAt,
+                    endedAt: Date.now(),
+                    detail,
+                    error: e instanceof Error ? e.message : String(e),
+                });
+                throw e;
+            }
+        };
+
+        this.enclaveBaseUrl = baseUrl.replace(/\/$/, '');
+
+        const attestation = await step('Fetch attestation (/.well-known/attestation)', async () => {
+            return await this.fetchAttestation();
+        });
+
+        trace.attestation = {
+            url: `${this.enclaveBaseUrl}/.well-known/attestation`,
+            decoded: {
+                module_id: (attestation as any).attestation_document?.module_id,
+                timestamp: (attestation as any).attestation_document?.timestamp,
+                pcr_count: (attestation as any).attestation_document?.pcrs ? Object.keys((attestation as any).attestation_document.pcrs).length : undefined,
+                public_key: (attestation as any).public_key,
+            },
+        };
+
+        // Prefer encryption public key embedded in the attestation document.
+        const embeddedEncKey = ((attestation as any).public_key || '').replace(/^0x/, '');
+        if (embeddedEncKey) {
+            await step('Use encryption public key from attestation', async () => undefined, {
+                source: 'attestation',
+            });
+            this.serverEncryptionPublicKeyDerHex = embeddedEncKey;
+            this.curve = detectCurve(embeddedEncKey);
+            trace.encryptionPublicKey = {
+                url: `${this.enclaveBaseUrl}/.well-known/attestation`,
+                public_key_der: embeddedEncKey,
+                curve: this.curve,
+            };
+        } else {
+            // Fallback only if the attestation response doesn't include a key.
+            const encKey = await step('Fetch encryption public key (/api/encryption/public_key)', async () => {
+                return await this.call<{ public_key_der?: string; public_key_pem?: string }>('/api/encryption/public_key', 'GET');
+            });
+
+            const encryptionPublicKey = (encKey.public_key_der || '').replace(/^0x/, '');
+            if (!encryptionPublicKey) throw new Error('Failed to retrieve enclave encryption public key');
+
+            this.serverEncryptionPublicKeyDerHex = encryptionPublicKey;
+            (attestation as any).public_key = encryptionPublicKey;
+            this.curve = detectCurve(encryptionPublicKey);
+            trace.encryptionPublicKey = {
+                url: `${this.enclaveBaseUrl}/api/encryption/public_key`,
+                public_key_der: encryptionPublicKey,
+                curve: this.curve,
+            };
+        }
+
+        await step('Generate client ephemeral keypair', async () => {
+            if (this.curve === 'P-384') {
+                this.p384KeyPair = await crypto.subtle.generateKey(
+                    { name: 'ECDH', namedCurve: 'P-384' },
+                    true,
+                    ['deriveBits']
+                );
+            } else {
+                this.secpPrivKey = secp256k1.utils.randomSecretKey();
+                this.secpPubKey = secp256k1.getPublicKey(this.secpPrivKey, false);
+            }
+        }, { curve: this.curve });
+
+        await step('Import server public key', async () => {
+            const serverPubKeyDer = hexToBytes(this.serverEncryptionPublicKeyDerHex);
+            if (this.curve === 'P-384') {
+                const serverPubKeyRaw = derToRaw(serverPubKeyDer, 'P-384');
+                this.serverP384Key = await crypto.subtle.importKey(
+                    'raw',
+                    serverPubKeyRaw as any,
+                    { name: 'ECDH', namedCurve: 'P-384' },
+                    true,
+                    []
+                );
+            } else {
+                this.serverSecpPubKeyRaw = derToRaw(serverPubKeyDer, 'secp256k1');
+                const rawHex = Array.from(this.serverSecpPubKeyRaw).map(b => b.toString(16).padStart(2, '0')).join('');
+                secp256k1.Point.fromHex(rawHex);
+            }
+        }, { curve: this.curve });
+
+        // Record client pubkey length for reference (DER/SPKI)
+        let clientPubDerLen: number | undefined;
+        try {
+            if (this.curve === 'P-384' && this.p384KeyPair) {
+                const raw = await crypto.subtle.exportKey('raw', this.p384KeyPair.publicKey);
+                clientPubDerLen = rawToDer(new Uint8Array(raw), 'P-384').length;
+            } else if (this.curve === 'secp256k1' && this.secpPubKey) {
+                clientPubDerLen = rawToDer(this.secpPubKey, 'secp256k1').length;
+            }
+        } catch {
+            // ignore
+        }
+        trace.client = { curve: this.curve, client_public_key_der_len: clientPubDerLen };
+
+        this.isConnected = true;
+        return { attestation, trace };
+    }
+
+    /**
      * Fetch attestation document from enclave.
      */
-    async fetchAttestation(): Promise<AttestationDoc & { parsedAttestation?: string }> {
+    async fetchAttestation(): Promise<FetchedAttestation> {
         const result = await fetchAttestation(this.enclaveBaseUrl);
-        const publicKey = result.attestation_document.public_key || '';
+        const publicKey = result.public_key || result.attestation_document?.public_key || '';
 
         return {
+            ...result,
+            raw_doc: result.raw_doc,
             attestation_doc: result.raw_doc,
             public_key: publicKey,
-            parsedAttestation: JSON.stringify(result)
         };
     }
 
@@ -204,9 +428,9 @@ export class EnclaveClient {
             {
                 name: 'HKDF',
                 hash: 'SHA-256',
-                // Security: Using a non-empty salt protects against scenarios where the input 
-                // key material (shared secret) might have low entropy or be reused.
-                salt: new TextEncoder().encode('Nova-RATLS-v1'),
+                // Odyn uses HKDF(salt=None, info="encryption data").
+                // Using an empty salt here is required for interoperability.
+                salt: new Uint8Array(0),
                 info: new TextEncoder().encode('encryption data')
             },
             hkdfKey,
@@ -222,8 +446,10 @@ export class EnclaveClient {
     async encrypt(plaintext: string): Promise<EncryptedPayload> {
         if (!this.isConnected) throw new Error('Not connected');
 
-        const attestation = await this.fetchAttestation();
-        const aesKey = await this.deriveSharedKey(attestation.public_key);
+        if (!this.serverEncryptionPublicKeyDerHex) {
+            throw new Error('Missing enclave encryption public key; call connect() first');
+        }
+        const aesKey = await this.deriveSharedKey(this.serverEncryptionPublicKeyDerHex);
 
         const nonce = crypto.getRandomValues(new Uint8Array(32));
         const ciphertext = await crypto.subtle.encrypt(
@@ -283,7 +509,30 @@ export class EnclaveClient {
         });
 
         if (!response.ok) {
-            throw new Error(`Request failed: ${response.status} ${response.statusText}`);
+            let bodyText: string | undefined;
+            try {
+                bodyText = await response.text();
+            } catch {
+                bodyText = undefined;
+            }
+
+            // Try to extract FastAPI-style { detail: ... }
+            let detail: string | undefined;
+            if (bodyText) {
+                try {
+                    const asJson = JSON.parse(bodyText);
+                    if (typeof asJson?.detail === 'string') {
+                        detail = asJson.detail;
+                    } else if (asJson?.detail != null) {
+                        detail = JSON.stringify(asJson.detail);
+                    }
+                } catch {
+                    // not JSON
+                }
+            }
+
+            const suffix = detail ? `: ${detail}` : (bodyText ? `: ${bodyText}` : '');
+            throw new Error(`Request failed: ${response.status} ${response.statusText}${suffix}`);
         }
 
         const result = await response.json();
@@ -295,6 +544,96 @@ export class EnclaveClient {
         }
 
         return result;
+    }
+
+    /**
+     * Call enclave API endpoint with encrypted payload and return a full trace of the interaction.
+     * This is meant for UI/debugging and attempts to capture request/response even on failures.
+     */
+    async callEncryptedTrace<T = any>(endpoint: string, data: any): Promise<EncryptedCallResult<T>> {
+        const plaintext = JSON.stringify(data);
+        const encrypted = await this.encrypt(plaintext);
+
+        const url = `${this.enclaveBaseUrl}${endpoint}`;
+        const trace: EncryptedCallTrace = {
+            endpoint,
+            url,
+            curve: this.curve,
+            server_encryption_public_key: this.serverEncryptionPublicKeyDerHex,
+            request: {
+                plaintext,
+                encrypted_payload: encrypted,
+            },
+            response: {
+                ok: false,
+                status: 0,
+                statusText: '',
+            },
+        };
+
+        try {
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(encrypted),
+            });
+
+            trace.response.ok = response.ok;
+            trace.response.status = response.status;
+            trace.response.statusText = response.statusText;
+
+            let bodyText: string | undefined;
+            try {
+                bodyText = await response.text();
+            } catch {
+                bodyText = undefined;
+            }
+            trace.response.body_text = bodyText;
+
+            if (bodyText) {
+                try {
+                    trace.response.json = JSON.parse(bodyText);
+                } catch {
+                    // non-JSON
+                }
+            }
+
+            if (!response.ok) {
+                const detail = (trace.response.json && (trace.response.json as any).detail)
+                    ? (typeof (trace.response.json as any).detail === 'string'
+                        ? (trace.response.json as any).detail
+                        : JSON.stringify((trace.response.json as any).detail))
+                    : undefined;
+                trace.error = `Request failed: ${response.status} ${response.statusText}${detail ? `: ${detail}` : ''}`;
+                return { trace };
+            }
+
+            // If response contains encrypted data, decrypt it
+            const json = trace.response.json;
+            if (json && json.data && json.data.encrypted_data) {
+                try {
+                    const decrypted = await this.decrypt(json.data);
+                    trace.response.decrypted_plaintext = decrypted;
+                    try {
+                        trace.response.decrypted_json = JSON.parse(decrypted);
+                    } catch {
+                        // not JSON
+                    }
+                    if (trace.response.decrypted_json != null) {
+                        return { data: trace.response.decrypted_json as T, trace };
+                    }
+                } catch (e) {
+                    trace.error = `Failed to decrypt response: ${e instanceof Error ? e.message : String(e)}`;
+                    return { trace };
+                }
+            }
+
+            // Plain JSON response
+            return { data: (json as T), trace };
+        } catch (e) {
+            trace.error = e instanceof Error ? e.message : String(e);
+            return { trace };
+        }
     }
 
     /**

@@ -20,6 +20,11 @@ logger = logging.getLogger("nova-app.chain")
 UPDATE_STATE_SELECTOR = "0x9f0e2260"  # keccak256("updateStateHash(bytes32)")[:4]
 
 
+def function_selector(signature: str) -> str:
+    """Return 4-byte function selector (0x-prefixed, 8 hex chars)."""
+    return "0x" + keccak(signature.encode("utf-8")).hex()[:8]
+
+
 def compute_state_hash(data: dict) -> str:
     """Compute keccak256 hash of state data for on-chain anchoring."""
     json_bytes = json.dumps(data, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -83,6 +88,85 @@ def estimate_gas(rpc_url: str, tx: Dict[str, str]) -> str:
 def encode_update_state_hash(state_hash: str) -> str:
     clean = state_hash.replace("0x", "").zfill(64)
     return f"{UPDATE_STATE_SELECTOR}{clean}"
+
+
+def _encode_uint256(value: int) -> str:
+    if value < 0:
+        raise ValueError("uint256 cannot be negative")
+    return hex(value).replace("0x", "").zfill(64)
+
+
+UPDATE_ETH_PRICE_SELECTOR = function_selector("updateEthPrice(uint256,uint256,uint256)")
+
+
+def encode_update_eth_price(*, request_id: int, price_usd: int, updated_at: int) -> str:
+    """ABI-encode updateEthPrice(uint256,uint256,uint256) call data (uint256-only)."""
+    return (
+        f"{UPDATE_ETH_PRICE_SELECTOR}"
+        f"{_encode_uint256(request_id)}"
+        f"{_encode_uint256(price_usd)}"
+        f"{_encode_uint256(updated_at)}"
+    )
+
+
+def sign_update_eth_price(
+    *,
+    odyn: Any,
+    contract_address: str,
+    chain_id: int,
+    rpc_url: str,
+    request_id: int,
+    price_usd: int,
+    updated_at: int,
+    broadcast: bool = False,
+) -> Dict[str, Any]:
+    """Build, sign and optionally broadcast updateEthPrice transaction."""
+    if not contract_address:
+        raise ValueError("Contract address is required")
+
+    tee_address = odyn.eth_address()
+    nonce = get_nonce(rpc_url, tee_address)
+    fee_params = get_fee_params(rpc_url)
+
+    data = encode_update_eth_price(request_id=request_id, price_usd=price_usd, updated_at=updated_at)
+
+    tx_for_estimate = {
+        "from": tee_address,
+        "to": contract_address,
+        "data": data,
+        "value": "0x0",
+    }
+    gas_limit = estimate_gas(rpc_url, tx_for_estimate)
+
+    tx = {
+        "kind": "structured",
+        "chain_id": hex(chain_id),
+        "nonce": nonce,
+        "max_priority_fee_per_gas": fee_params["max_priority_fee_per_gas"],
+        "max_fee_per_gas": fee_params["max_fee_per_gas"],
+        "gas_limit": gas_limit,
+        "to": contract_address,
+        "value": "0x0",
+        "data": data,
+    }
+
+    signed = odyn.sign_tx(tx)
+    result: Dict[str, Any] = {
+        "raw_transaction": signed.get("raw_transaction"),
+        "transaction_hash": signed.get("transaction_hash"),
+        "address": signed.get("address"),
+    }
+
+    if broadcast:
+        try:
+            rpc_tx_hash = _rpc_call(rpc_url, "eth_sendRawTransaction", [result["raw_transaction"]])
+            result["broadcasted"] = True
+            result["rpc_tx_hash"] = rpc_tx_hash
+        except Exception as e:
+            result["broadcasted"] = False
+            result["broadcast_error"] = str(e)
+
+    return result
 
 
 def sign_update_state_hash(

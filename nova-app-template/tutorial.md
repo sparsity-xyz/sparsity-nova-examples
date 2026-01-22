@@ -104,6 +104,10 @@ Ideal for Oracles or state sync.
 
 ---
 
+## CORS Configuration (Cross-Origin Frontends)
+
+Because the frontend may be hosted on any domain, the template allows cross-origin access by default (`CORS_ORIGINS=*`). If you need credentials (cookie/Authorization), set `CORS_ORIGINS` to an explicit allowlist and keep `CORS_ALLOW_CREDENTIALS=true`. Configuration lives in [enclave/app.py](enclave/app.py).
+
 ## 4. Develop Frontend Interface
 
 Located in `frontend/`. It's a **Next.js** application.
@@ -122,7 +126,15 @@ To make your app verifiable, deploy `contracts/src/NovaAppBase.sol`.
 Nova platform bridges the gap between your TEE and your Contract:
 1. **Deploy Contract**: Deploy `NovaAppBase` to your target chain.
 2. **Nova Setup**: In the Nova Console, enter your **Contract Address** during app creation.
-3. **Registration**: When the TEE starts, Nova Platform automatically registers its hardware wallet address in your contract by calling `registerTeeWallet`.
+3. **Registration**: When the TEE starts, Nova Platform automatically registers its hardware wallet address in your contract by calling `registerTEEWallet` via the Nova Registry.
+
+### Nova App Contract Deployment Flow
+1. Deploy the app contract (must extend [contracts/src/ISparsityApp.sol](contracts/src/ISparsityApp.sol))
+2. Verify the contract on Base Sepolia
+3. Call `setNovaRegistry` to set the Nova Registry contract address
+4. Create the app on the Nova platform with the contract address
+5. ZKP Registration Service generates proofs and registers/verifies the app in the Nova Registry
+6. Nova Registry calls `registerTEEWallet` on your app contract
 
 ---
 

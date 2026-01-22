@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 
-import { EnclaveClient } from '@/lib/crypto';
+import { EnclaveClient, type EncryptedCallTrace, type FetchedAttestation, type RATLSConnectTrace } from '@/lib/crypto';
 
 interface ConnectionStatus {
     connected: boolean;
@@ -26,17 +26,24 @@ export default function Home() {
     });
     const [loading, setLoading] = useState(false);
     const [activeTab, setActiveTab] = useState('identity');
-    const [response, setResponse] = useState<ApiResponse | null>(null);
+    const [responsesByTab, setResponsesByTab] = useState<Record<string, ApiResponse | null>>({});
+    const activeResponse = responsesByTab[activeTab] || null;
+
+    const [ratlsTrace, setRATlsTrace] = useState<RATLSConnectTrace | null>(null);
+    const [showRATlsTrace, setShowRATlsTrace] = useState(false);
 
     const [showAttestation, setShowAttestation] = useState(false);
     const [attestationLoading, setAttestationLoading] = useState(false);
     const [attestationError, setAttestationError] = useState<string | null>(null);
-    const [attestationData, setAttestationData] = useState<any>(null);
+    const [attestationData, setAttestationData] = useState<FetchedAttestation | null>(null);
+    const [attestationView, setAttestationView] = useState<'decoded' | 'raw' | 'full'>('decoded');
 
     // Form inputs
     const [echoMsg, setEchoMsg] = useState('Hello from Nova!');
     const [storageKey, setStorageKey] = useState('user_settings');
     const [storageVal, setStorageVal] = useState('{"theme": "dark"}');
+
+    const [echoTrace, setEchoTrace] = useState<EncryptedCallTrace | null>(null);
 
     // Auto-detect enclave URL from current location
     useEffect(() => {
@@ -52,7 +59,10 @@ export default function Home() {
         if (!status.enclaveUrl) return;
         setLoading(true);
         try {
-            const attestation = await client.connect(status.enclaveUrl);
+            setRATlsTrace(null);
+            setShowRATlsTrace(false);
+            const { attestation, trace } = await client.connectWithTrace(status.enclaveUrl);
+            setRATlsTrace(trace);
             const statusInfo = await client.call('/status');
             setStatus({
                 ...status,
@@ -60,7 +70,10 @@ export default function Home() {
                 teeAddress: statusInfo.eth_address,
                 error: undefined,
             });
-            setResponse({ success: true, data: { attestation, statusInfo }, type: 'Connection' });
+            setResponsesByTab(prev => ({
+                ...prev,
+                identity: { success: true, data: { attestation, statusInfo }, type: 'Connection' },
+            }));
         } catch (error) {
             setStatus({
                 ...status,
@@ -72,9 +85,14 @@ export default function Home() {
         }
     };
 
+    const handleTabChange = (tabId: string) => {
+        setActiveTab(tabId);
+    };
+
     const callApi = async (path: string, method: 'GET' | 'POST' = 'GET', body?: any, encrypted = false) => {
+        const tabAtCall = activeTab;
         setLoading(true);
-        setResponse(null);
+        setResponsesByTab(prev => ({ ...prev, [tabAtCall]: null }));
         try {
             let res;
             if (encrypted) {
@@ -82,9 +100,44 @@ export default function Home() {
             } else {
                 res = await client.call(path, method, body);
             }
-            setResponse({ success: true, data: res, type: path });
+            setResponsesByTab(prev => ({
+                ...prev,
+                [tabAtCall]: { success: true, data: res, type: path },
+            }));
         } catch (error) {
-            setResponse({ success: false, error: error instanceof Error ? error.message : 'Request failed', type: path });
+            setResponsesByTab(prev => ({
+                ...prev,
+                [tabAtCall]: { success: false, error: error instanceof Error ? error.message : 'Request failed', type: path },
+            }));
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const callEchoEncrypted = async () => {
+        setLoading(true);
+        setResponsesByTab(prev => ({ ...prev, 'secure-echo': null }));
+        setEchoTrace(null);
+
+        try {
+            const { data, trace } = await client.callEncryptedTrace('/api/echo', { message: echoMsg });
+            setEchoTrace(trace);
+            if (data !== undefined) {
+                setResponsesByTab(prev => ({
+                    ...prev,
+                    'secure-echo': { success: true, data, type: '/api/echo (encrypted)' },
+                }));
+            } else {
+                setResponsesByTab(prev => ({
+                    ...prev,
+                    'secure-echo': { success: false, error: trace.error || 'Request failed', type: '/api/echo (encrypted)' },
+                }));
+            }
+        } catch (error) {
+            setResponsesByTab(prev => ({
+                ...prev,
+                'secure-echo': { success: false, error: error instanceof Error ? error.message : 'Request failed', type: '/api/echo (encrypted)' },
+            }));
         } finally {
             setLoading(false);
         }
@@ -112,6 +165,7 @@ export default function Home() {
         setAttestationLoading(true);
         setAttestationError(null);
         setAttestationData(null);
+        setAttestationView('decoded');
         try {
             const attestation = await client.fetchAttestation();
             setAttestationData(attestation);
@@ -119,6 +173,23 @@ export default function Home() {
             setAttestationError(error instanceof Error ? error.message : 'Failed to fetch attestation');
         } finally {
             setAttestationLoading(false);
+        }
+    };
+
+    const copyToClipboard = async (text: string) => {
+        try {
+            await navigator.clipboard.writeText(text);
+        } catch {
+            // Fallback for older browsers
+            const textarea = document.createElement('textarea');
+            textarea.value = text;
+            textarea.style.position = 'fixed';
+            textarea.style.left = '-9999px';
+            document.body.appendChild(textarea);
+            textarea.focus();
+            textarea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textarea);
         }
     };
 
@@ -177,13 +248,14 @@ export default function Home() {
                         <nav className="flex flex-col gap-2">
                             {[
                                 { id: 'identity', label: 'Identity & RA-TLS', icon: '🔑' },
+                                { id: 'secure-echo', label: 'Secure Echo', icon: '🔒' },
                                 { id: 'storage', label: 'S3 Storage', icon: '📦' },
                                 { id: 'oracle', label: 'Oracle Demo', icon: '🌐' },
                                 { id: 'events', label: 'Event Monitor', icon: '📊' },
                             ].map(tab => (
                                 <button
                                     key={tab.id}
-                                    onClick={() => setActiveTab(tab.id)}
+                                    onClick={() => handleTabChange(tab.id)}
                                     className={`group flex items-center gap-3 px-4 py-3 rounded-xl transition text-left border ${activeTab === tab.id
                                         ? 'bg-blue-50 text-slate-900 border-blue-200 shadow-sm shadow-blue-100/60'
                                         : 'text-slate-600 border-transparent hover:border-slate-200 hover:bg-slate-50'
@@ -204,6 +276,12 @@ export default function Home() {
                                     <label className="text-xs text-slate-500 block mb-1">TEE Wallet Address</label>
                                     <code className="text-xs bg-slate-50 px-2 py-1 rounded block truncate border border-slate-200 text-slate-700">
                                         {status.teeAddress}
+                                    </code>
+                                </div>
+                                <div>
+                                    <label className="text-xs text-slate-500 block mb-1">App Contract Address</label>
+                                    <code className="text-xs bg-slate-50 px-2 py-1 rounded block truncate border border-slate-200 text-slate-700">
+                                        {responsesByTab.identity?.data?.statusInfo?.contract_address || 'Not configured'}
                                     </code>
                                 </div>
                                 <div className="flex gap-2 text-xs">
@@ -227,6 +305,102 @@ export default function Home() {
                                 </p>
 
                                 <div className="space-y-4">
+                                    <div className="flex gap-4">
+                                        <button
+                                            onClick={handleViewAttestation}
+                                            disabled={loading || !status.connected}
+                                            className="text-sm text-blue-600 hover:text-blue-700 font-medium"
+                                        >
+                                            Fetch Attestation →
+                                        </button>
+                                        <button
+                                            onClick={() => setShowRATlsTrace((v) => !v)}
+                                            disabled={loading || !status.connected || !ratlsTrace}
+                                            className="text-sm text-slate-600 hover:text-slate-800 font-medium disabled:opacity-50"
+                                        >
+                                            {showRATlsTrace ? 'Hide RA‑TLS Trace →' : 'Show RA‑TLS Trace →'}
+                                        </button>
+                                        <button
+                                            onClick={() => {
+                                                setShowAttestation(false);
+                                                setShowRATlsTrace(false);
+                                                callApi('/api/random', 'GET');
+                                            }}
+                                            disabled={loading || !status.connected}
+                                            className="text-sm text-emerald-600 hover:text-emerald-700 font-medium"
+                                        >
+                                            Fetch Hardware Entropy (NSM) →
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {ratlsTrace && showRATlsTrace && (
+                                    <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-5">
+                                        <div className="flex items-center justify-between gap-4">
+                                            <div>
+                                                <p className="text-xs uppercase tracking-widest text-slate-500">RA-TLS Establishment Trace</p>
+                                                <p className="text-sm text-slate-700 break-all mt-1">{ratlsTrace.baseUrl}</p>
+                                            </div>
+                                            <button
+                                                onClick={() => copyToClipboard(JSON.stringify(ratlsTrace, null, 2))}
+                                                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-white hover:bg-slate-100 text-slate-700 border border-slate-200"
+                                            >
+                                                Copy Trace JSON
+                                            </button>
+                                        </div>
+
+                                        <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            <div className="bg-white border border-slate-200 rounded-xl p-4">
+                                                <p className="text-xs uppercase tracking-widest text-slate-500 mb-2">Key Material (metadata)</p>
+                                                <div className="text-xs text-slate-700 space-y-1">
+                                                    <div><span className="text-slate-500">Curve:</span> {ratlsTrace.encryptionPublicKey?.curve || '—'}</div>
+                                                    <div className="break-all"><span className="text-slate-500">Server encryption public key:</span> {ratlsTrace.encryptionPublicKey?.public_key_der || '—'}</div>
+                                                    <div><span className="text-slate-500">Client pubkey DER length:</span> {ratlsTrace.client?.client_public_key_der_len ?? '—'}</div>
+                                                </div>
+                                            </div>
+
+                                            <div className="bg-white border border-slate-200 rounded-xl p-4">
+                                                <p className="text-xs uppercase tracking-widest text-slate-500 mb-2">Attestation (summary)</p>
+                                                <div className="text-xs text-slate-700 space-y-1">
+                                                    <div className="break-all"><span className="text-slate-500">Module ID:</span> {ratlsTrace.attestation?.decoded?.module_id || '—'}</div>
+                                                    <div><span className="text-slate-500">Timestamp:</span> {ratlsTrace.attestation?.decoded?.timestamp ? new Date(ratlsTrace.attestation.decoded.timestamp * 1000).toISOString() : '—'}</div>
+                                                    <div><span className="text-slate-500">PCR count:</span> {ratlsTrace.attestation?.decoded?.pcr_count ?? '—'}</div>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div className="mt-4 bg-white border border-slate-200 rounded-xl p-4">
+                                            <p className="text-xs uppercase tracking-widest text-slate-500 mb-3">Steps</p>
+                                            <div className="space-y-2">
+                                                {ratlsTrace.steps.map((s, idx) => (
+                                                    <div key={idx} className={`flex items-start justify-between gap-3 rounded-lg border px-3 py-2 ${s.ok ? 'border-emerald-200 bg-emerald-50/50' : 'border-red-200 bg-red-50/50'}`}>
+                                                        <div>
+                                                            <div className="text-xs font-semibold text-slate-800">{s.name}</div>
+                                                            {!s.ok && s.error && (
+                                                                <div className="text-xs text-red-700 mt-1 break-words">{s.error}</div>
+                                                            )}
+                                                        </div>
+                                                        <div className="text-[11px] text-slate-500 whitespace-nowrap">
+                                                            {(s.endedAt - s.startedAt)}ms
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {activeTab === 'secure-echo' && (
+                            <div className="space-y-6">
+                                <h2 className="text-xl font-semibold mb-4">Secure Echo</h2>
+                                <p className="text-slate-600 text-sm leading-relaxed mb-6">
+                                    Send an encrypted request to the enclave using ECDH + AES-GCM and (optionally) inspect the full
+                                    end-to-end interaction.
+                                </p>
+
+                                <div className="space-y-4">
                                     <div className="flex flex-col gap-2">
                                         <label className="text-sm text-slate-600">Message to Echo</label>
                                         <div className="flex gap-2">
@@ -236,7 +410,7 @@ export default function Home() {
                                                 onChange={(e) => setEchoMsg(e.target.value)}
                                             />
                                             <button
-                                                onClick={() => callApi('/api/echo', 'POST', { message: echoMsg }, true)}
+                                                onClick={callEchoEncrypted}
                                                 disabled={loading || !status.connected}
                                                 className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded-lg font-semibold shadow-sm disabled:opacity-50"
                                             >
@@ -244,25 +418,73 @@ export default function Home() {
                                             </button>
                                         </div>
                                     </div>
-                                    <div className="flex gap-4">
-                                        <button
-                                            onClick={handleViewAttestation}
-                                            disabled={loading || !status.connected}
-                                            className="text-sm text-blue-600 hover:text-blue-700 font-medium"
-                                        >
-                                            View Attestation Document →
-                                        </button>
-                                        <button
-                                            onClick={() => {
-                                                setShowAttestation(false);
-                                                callApi('/api/random', 'GET');
-                                            }}
-                                            disabled={loading || !status.connected}
-                                            className="text-sm text-emerald-600 hover:text-emerald-700 font-medium"
-                                        >
-                                            Fetch Hardware Entropy (NSM) →
-                                        </button>
-                                    </div>
+
+                                    {echoTrace && (
+                                        <div className="mt-2 rounded-2xl border border-slate-200 bg-slate-50 p-5">
+                                            <div className="flex items-center justify-between gap-4">
+                                                <div>
+                                                    <p className="text-xs uppercase tracking-widest text-slate-500">Encrypted Echo Trace</p>
+                                                    <p className="text-sm text-slate-700 break-all mt-1">
+                                                        {echoTrace.url}
+                                                    </p>
+                                                </div>
+                                                <button
+                                                    onClick={() => copyToClipboard(JSON.stringify(echoTrace, null, 2))}
+                                                    className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-white hover:bg-slate-100 text-slate-700 border border-slate-200"
+                                                >
+                                                    Copy Trace JSON
+                                                </button>
+                                            </div>
+
+                                            {echoTrace.error && (
+                                                <div className="mt-4 bg-red-50 border border-red-200 rounded-xl p-3">
+                                                    <p className="text-xs font-semibold text-red-700">Error</p>
+                                                    <p className="text-xs text-red-700 break-words mt-1">{echoTrace.error}</p>
+                                                </div>
+                                            )}
+
+                                            <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                <div className="bg-white border border-slate-200 rounded-xl p-4">
+                                                    <p className="text-xs uppercase tracking-widest text-slate-500 mb-2">Request (plaintext)</p>
+                                                    <pre className="text-xs font-mono whitespace-pre-wrap break-words text-slate-700 max-h-56 overflow-auto">
+                                                        {echoTrace.request.plaintext}
+                                                    </pre>
+                                                </div>
+
+                                                <div className="bg-white border border-slate-200 rounded-xl p-4">
+                                                    <p className="text-xs uppercase tracking-widest text-slate-500 mb-2">Request (encrypted envelope)</p>
+                                                    <pre className="text-xs font-mono whitespace-pre-wrap break-words text-slate-700 max-h-56 overflow-auto">
+                                                        {JSON.stringify(echoTrace.request.encrypted_payload, null, 2)}
+                                                    </pre>
+                                                </div>
+
+                                                <div className="bg-white border border-slate-200 rounded-xl p-4">
+                                                    <p className="text-xs uppercase tracking-widest text-slate-500 mb-2">Response (raw)</p>
+                                                    <div className="text-[11px] text-slate-600 mb-2">
+                                                        HTTP {echoTrace.response.status} {echoTrace.response.statusText}
+                                                    </div>
+                                                    <pre className="text-xs font-mono whitespace-pre-wrap break-words text-slate-700 max-h-56 overflow-auto">
+                                                        {echoTrace.response.body_text || ''}
+                                                    </pre>
+                                                </div>
+
+                                                <div className="bg-white border border-slate-200 rounded-xl p-4">
+                                                    <p className="text-xs uppercase tracking-widest text-slate-500 mb-2">Response (decrypted plaintext)</p>
+                                                    <pre className="text-xs font-mono whitespace-pre-wrap break-words text-slate-700 max-h-56 overflow-auto">
+                                                        {echoTrace.response.decrypted_plaintext || ''}
+                                                    </pre>
+                                                </div>
+                                            </div>
+
+                                            <div className="mt-4 bg-white border border-slate-200 rounded-xl p-4">
+                                                <p className="text-xs uppercase tracking-widest text-slate-500 mb-2">Metadata</p>
+                                                <div className="text-xs text-slate-700 space-y-1">
+                                                    <div><span className="text-slate-500">Curve:</span> {echoTrace.curve}</div>
+                                                    <div className="break-all"><span className="text-slate-500">Server encryption public key:</span> {echoTrace.server_encryption_public_key || '—'}</div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         )}
@@ -332,13 +554,14 @@ export default function Home() {
                                         <div className="text-2xl font-mono text-slate-900 tracking-tight">ETH / USD</div>
                                     </div>
                                     <button
-                                        onClick={() => callApi('/api/oracle/price', 'GET')}
+                                        onClick={() => callApi('/api/oracle/update-now', 'POST')}
                                         disabled={loading || !status.connected}
                                         className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white px-8 py-3 rounded-xl font-semibold shadow-lg shadow-blue-200/60"
                                     >
-                                        Fetch & Sign Update
+                                        Update On-Chain Now
                                     </button>
                                 </div>
+
                             </div>
                         )}
 
@@ -355,16 +578,16 @@ export default function Home() {
                                         <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
                                             <label className="text-xs text-slate-500 block mb-1">Last Cron Run</label>
                                             <span className="text-sm font-mono text-emerald-600 italic">
-                                                {status.connected && response?.data?.cron_info?.last_run
-                                                    ? new Date(response.data.cron_info.last_run).toLocaleTimeString()
+                                                {status.connected && activeResponse?.data?.cron_info?.last_run
+                                                    ? new Date(activeResponse.data.cron_info.last_run).toLocaleTimeString()
                                                     : 'Awaiting sync...'}
                                             </span>
                                         </div>
                                         <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
                                             <label className="text-xs text-slate-500 block mb-1">State Hash (Keccak256)</label>
                                             <span className="text-sm font-mono text-blue-600 italic truncate block">
-                                                {status.connected && response?.data?.last_state_hash
-                                                    ? `0x${response.data.last_state_hash.slice(0, 16)}...`
+                                                {status.connected && activeResponse?.data?.last_state_hash
+                                                    ? `0x${activeResponse.data.last_state_hash.slice(0, 16)}...`
                                                     : 'Awaiting sync...'}
                                             </span>
                                         </div>
@@ -374,7 +597,7 @@ export default function Home() {
                                         <div className="flex items-center gap-2">
                                             <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
                                             <span className="text-xs text-slate-600">
-                                                Worker active • {response?.data?.cron_info?.counter || 0} tasks completed
+                                                Worker active • {activeResponse?.data?.cron_info?.counter || 0} tasks completed
                                             </span>
                                         </div>
                                     </div>
@@ -385,23 +608,82 @@ export default function Home() {
                                     >
                                         Refresh Background Job Stats
                                     </button>
+
+                                    <button
+                                        onClick={() => callApi('/api/events/oracle?lookback=1000', 'GET')}
+                                        disabled={loading || !status.connected}
+                                        className="w-full py-3 border border-slate-200 rounded-xl text-sm font-medium hover:bg-slate-50 transition"
+                                    >
+                                        Load Oracle Events (Last 1000 Blocks)
+                                    </button>
+
+                                    {activeResponse?.type === '/api/events/oracle?lookback=1000' && activeResponse.success && (
+                                        <div className="bg-white border border-slate-200 rounded-2xl p-4">
+                                            <div className="flex items-center justify-between mb-3">
+                                                <div className="text-xs font-bold text-slate-500 uppercase tracking-widest">
+                                                    Oracle Events
+                                                </div>
+                                                <div className="text-xs text-slate-500 font-mono">
+                                                    blocks {activeResponse.data?.from_block} → {activeResponse.data?.to_block}
+                                                </div>
+                                            </div>
+
+                                            <div className="overflow-auto max-h-[320px]">
+                                                <table className="w-full text-xs">
+                                                    <thead className="text-slate-500">
+                                                        <tr className="border-b border-slate-200">
+                                                            <th className="text-left py-2 pr-3">Block</th>
+                                                            <th className="text-left py-2 pr-3">Type</th>
+                                                            <th className="text-left py-2 pr-3">Request ID</th>
+                                                            <th className="text-left py-2 pr-3">Price</th>
+                                                            <th className="text-left py-2 pr-3">Handled</th>
+                                                            <th className="text-left py-2 pr-3">Tx</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody className="text-slate-700">
+                                                        {(activeResponse.data?.events || []).map((e: any, idx: number) => (
+                                                            <tr key={idx} className="border-b border-slate-100">
+                                                                <td className="py-2 pr-3 font-mono">{e.block_number}</td>
+                                                                <td className="py-2 pr-3">{e.type}</td>
+                                                                <td className="py-2 pr-3 font-mono">{e.request_id}</td>
+                                                                <td className="py-2 pr-3 font-mono">
+                                                                    {e.type === 'EthPriceUpdated' ? `$${e.price_usd}` : '-'}
+                                                                </td>
+                                                                <td className="py-2 pr-3">
+                                                                    {e.type === 'EthPriceUpdateRequested'
+                                                                        ? (e.handled ? 'yes' : 'no')
+                                                                        : '-'}
+                                                                </td>
+                                                                <td className="py-2 pr-3 font-mono">
+                                                                    {e.tx_hash ? `${e.tx_hash.slice(0, 10)}…` : ''}
+                                                                </td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                            <p className="mt-3 text-xs text-slate-500">
+                                                If an on-chain update request is detected, the enclave will fetch ETH/USD and submit an on-chain update.
+                                            </p>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         )}
 
                         {/* Universal Response Viewer */}
-                        {response && (
+                        {activeResponse && (
                             <div className="mt-8 border-t border-slate-200 pt-8 animate-in fade-in slide-in-from-top-4 duration-300">
                                 <div className="flex justify-between items-center mb-3">
                                     <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest">
-                                        Latest Response: {response.type}
+                                        Latest Response: {activeResponse.type}
                                     </h3>
-                                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${response.success ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
-                                        {response.success ? 'SUCCESS' : 'FAILED'}
+                                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${activeResponse.success ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
+                                        {activeResponse.success ? 'SUCCESS' : 'FAILED'}
                                     </span>
                                 </div>
                                 <pre className="bg-slate-50 rounded-xl p-5 text-xs font-mono text-slate-700 overflow-auto max-h-[300px] border border-slate-200 whitespace-pre-wrap">
-                                    {JSON.stringify(response.data || response.error, null, 2)}
+                                    {JSON.stringify(activeResponse.data || activeResponse.error, null, 2)}
                                 </pre>
                             </div>
                         )}
@@ -418,7 +700,7 @@ export default function Home() {
                     <div className="bg-white border border-slate-200 rounded-3xl shadow-2xl max-w-5xl w-full max-h-[90vh] flex flex-col overflow-hidden">
                         <div className="px-8 py-5 border-b border-slate-200 flex items-center justify-between">
                             <div>
-                                <h2 className="text-lg font-semibold text-slate-900">Attestation Document</h2>
+                                <h2 className="text-lg font-semibold text-slate-900">Fetch Attestation</h2>
                                 <p className="text-xs text-slate-500">Hardware-backed proof from AWS Nitro Enclave</p>
                             </div>
                             <button
@@ -445,6 +727,29 @@ export default function Home() {
                                 </div>
                             ) : attestationData ? (
                                 <div className="space-y-4">
+                                    <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                                        <div className="space-y-1">
+                                            <p className="text-xs uppercase tracking-widest text-slate-500">Attestation URL (POST only)</p>
+                                            <p className="text-sm text-slate-800 break-all">
+                                                {(status.enclaveUrl || '').replace(/\/$/, '')}/.well-known/attestation
+                                            </p>
+                                        </div>
+                                        <div className="flex flex-wrap gap-2">
+                                            <button
+                                                onClick={() => copyToClipboard(`${(status.enclaveUrl || '').replace(/\/$/, '')}/.well-known/attestation`)}
+                                                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200"
+                                            >
+                                                Copy URL
+                                            </button>
+                                            <button
+                                                onClick={() => copyToClipboard(attestationData.raw_doc)}
+                                                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200"
+                                            >
+                                                Copy Raw
+                                            </button>
+                                        </div>
+                                    </div>
+
                                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                         <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4">
                                             <p className="text-xs uppercase tracking-widest text-slate-500">Module ID</p>
@@ -470,14 +775,67 @@ export default function Home() {
                                         </div>
                                     </div>
 
-                                    <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 overflow-auto max-h-[50vh]">
-                                        <code
-                                            className="text-xs text-slate-700 block whitespace-pre-wrap break-words"
-                                            dangerouslySetInnerHTML={{
-                                                __html: syntaxHighlight(JSON.stringify(attestationData, null, 2)),
-                                            }}
-                                        />
+                                    {attestationData.attestation_document?.pcrs && (
+                                        <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4">
+                                            <p className="text-xs uppercase tracking-widest text-slate-500 mb-3">PCR Values</p>
+                                            <div className="space-y-2">
+                                                {Object.entries(attestationData.attestation_document.pcrs)
+                                                    .sort(([a], [b]) => Number(a) - Number(b))
+                                                    .map(([idx, value]) => (
+                                                        <div key={idx} className="flex flex-col md:flex-row md:items-start md:gap-3">
+                                                            <span className="text-xs font-semibold text-slate-600 w-12 shrink-0">PCR{idx}</span>
+                                                            <code className="text-xs text-slate-700 break-all bg-white border border-slate-200 rounded-lg px-2 py-1">
+                                                                {value}
+                                                            </code>
+                                                        </div>
+                                                    ))}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    <div className="flex flex-wrap gap-2">
+                                        {[
+                                            { id: 'decoded', label: 'Decoded' },
+                                            { id: 'raw', label: 'Raw (base64)' },
+                                            { id: 'full', label: 'Full JSON' },
+                                        ].map(tab => (
+                                            <button
+                                                key={tab.id}
+                                                onClick={() => setAttestationView(tab.id as any)}
+                                                className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition ${attestationView === tab.id
+                                                    ? 'bg-blue-600 text-white border-blue-600'
+                                                    : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                                                    }`}
+                                            >
+                                                {tab.label}
+                                            </button>
+                                        ))}
                                     </div>
+
+                                    {attestationView === 'raw' ? (
+                                        <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 overflow-auto max-h-[50vh]">
+                                            <code className="text-xs text-slate-700 block whitespace-pre-wrap break-words">
+                                                {attestationData.raw_doc}
+                                            </code>
+                                        </div>
+                                    ) : (
+                                        <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 overflow-auto max-h-[50vh]">
+                                            <code
+                                                className="text-xs text-slate-700 block whitespace-pre-wrap break-words"
+                                                dangerouslySetInnerHTML={{
+                                                    __html: syntaxHighlight(
+                                                        JSON.stringify(
+                                                            attestationView === 'decoded'
+                                                                ? attestationData.attestation_document
+                                                                : attestationData,
+                                                            null,
+                                                            2
+                                                        )
+                                                    ),
+                                                }}
+                                            />
+                                        </div>
+                                    )}
                                 </div>
                             ) : null}
                         </div>

@@ -29,13 +29,16 @@ import json
 import logging
 import os
 import base64
+from datetime import datetime
 from typing import Optional, Dict, Any, TYPE_CHECKING
 
 import requests
+from eth_hash.auto import keccak
 from fastapi import APIRouter, HTTPException, Body, Response
 from pydantic import BaseModel
 
 from chain import compute_state_hash, sign_update_state_hash
+from chain import sign_update_eth_price
 
 # Type hint for Odyn (actual import would cause circular dependency)
 if TYPE_CHECKING:
@@ -243,17 +246,30 @@ def echo_example(payload: Dict[str, Any] = Body(...)):
     # Encrypted flow: {nonce, public_key, data}
     if {"nonce", "public_key", "data"}.issubset(payload.keys()):
         enc = EncryptedPayload(**payload)
-        plaintext = odyn.decrypt(enc.nonce, enc.public_key, enc.data)
-        req = EchoRequest(**json.loads(plaintext))
-        response = {"reply": f"Echo: {req.message}", "tee_address": address}
-        encrypted = odyn.encrypt(json.dumps(response), enc.public_key)
-        return {
-            "data": {
-                "encrypted_data": encrypted.get("encrypted_data"),
-                "nonce": encrypted.get("nonce"),
-                "public_key": encrypted.get("enclave_public_key"),
+        try:
+            plaintext = odyn.decrypt(enc.nonce, enc.public_key, enc.data)
+            req = EchoRequest(**json.loads(plaintext))
+            response = {"reply": f"Echo: {req.message}", "tee_address": address}
+            encrypted = odyn.encrypt(json.dumps(response), enc.public_key)
+            return {
+                "data": {
+                    "encrypted_data": encrypted.get("encrypted_data"),
+                    "nonce": encrypted.get("nonce"),
+                    "public_key": encrypted.get("enclave_public_key"),
+                }
             }
-        }
+        except requests.exceptions.HTTPError as e:
+            detail = None
+            try:
+                detail = e.response.text if e.response is not None else None
+            except Exception:
+                detail = None
+            raise HTTPException(
+                status_code=400,
+                detail=f"Odyn encryption/decryption failed: {detail or str(e)}",
+            )
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Encrypted request failed: {str(e)}")
 
     # Plaintext flow
     req = EchoRequest(**payload)
@@ -447,10 +463,14 @@ def delete_from_storage(key: str):
 
 # Contract configuration (set via environment variables)
 CONTRACT_ADDRESS = os.getenv("CONTRACT_ADDRESS", "")
+APP_CONTRACT_ADDRESS = os.getenv("APP_CONTRACT_ADDRESS", "")
 RPC_URL = os.getenv("RPC_URL", "https://sepolia.base.org")
 CHAIN_ID = int(os.getenv("CHAIN_ID", "84532"))  # Base Sepolia
 BROADCAST_TX = os.getenv("BROADCAST_TX", "false").lower() == "true"
 ANCHOR_ON_WRITE = os.getenv("ANCHOR_ON_WRITE", "true").lower() == "true"
+
+if not CONTRACT_ADDRESS and APP_CONTRACT_ADDRESS:
+    CONTRACT_ADDRESS = APP_CONTRACT_ADDRESS
 
 
 @router.get("/contract")
@@ -530,53 +550,162 @@ def update_contract_state(req: ContractWriteRequest):
 @router.get("/oracle/price")
 def get_oracle_price_tx():
     """
-    Oracle Demo: Fetch internet data and sign an on-chain update.
-    
-    1. Fetches ETH price from Coingecko API
-    2. Encodes updatePrice(uint256) transaction
-    3. Signs transaction with TEE key
+    Oracle Demo (legacy): Fetch internet data and sign an on-chain update.
+
+    Prefer POST /oracle/update-now for a real on-chain update flow.
+    """
+    return update_oracle_price_now()
+
+
+@router.post("/oracle/update-now")
+def update_oracle_price_now():
+    """Fetch ETH/USD and update the on-chain app contract via updateEthPrice.
+
+    - If BROADCAST_TX=true, the enclave will attempt to send the tx via RPC.
+    - Otherwise returns a raw signed tx for the caller to broadcast.
     """
     if not odyn:
         raise HTTPException(status_code=500, detail="Odyn not initialized")
-    
+
+    if not CONTRACT_ADDRESS:
+        raise HTTPException(status_code=400, detail="Contract not configured. Set CONTRACT_ADDRESS or APP_CONTRACT_ADDRESS.")
+
     try:
-        # 1. Fetch internet data
         res = requests.get(
             "https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd",
-            timeout=10
+            timeout=10,
         )
         res.raise_for_status()
-        price = int(res.json()["ethereum"]["usd"])
-        
-        # 2. Encode transaction (simple example)
-        # updatePrice(uint256) -> 0x91b702ec
-        function_selector = "0x91b702ec"
-        price_hex = hex(price).replace("0x", "").zfill(64)
-        call_data = f"{function_selector}{price_hex}"
-        
-        # 3. Sign transaction
-        tx = {
-            "kind": "structured",
-            "chain_id": hex(CHAIN_ID),
-            "nonce": "0x0", 
-            "max_priority_fee_per_gas": "0x5F5E100",
-            "max_fee_per_gas": "0xB2D05E00",
-            "gas_limit": "0x30D40",
-            "to": CONTRACT_ADDRESS or "0x0000000000000000000000000000000000000000",
-            "value": "0x0",
-            "data": call_data
-        }
-        
-        signed = odyn.sign_tx(tx)
-        
+        price_usd = int(res.json()["ethereum"]["usd"])
+
+        updated_at = int(datetime.utcnow().timestamp())
+
+        signed = sign_update_eth_price(
+            odyn=odyn,
+            contract_address=CONTRACT_ADDRESS,
+            chain_id=CHAIN_ID,
+            rpc_url=RPC_URL,
+            request_id=0,
+            price_usd=price_usd,
+            updated_at=updated_at,
+            broadcast=BROADCAST_TX,
+        )
+
+        if app_state is not None:
+            oracle_state = app_state.setdefault("data", {}).setdefault("oracle", {})
+            oracle_state["last_price_usd"] = price_usd
+            oracle_state["last_updated_at"] = updated_at
+            oracle_state["last_reason"] = "api"
+            oracle_state["last_tx"] = signed
+
         return {
-            "price_usd": price,
-            "transaction": signed,
-            "note": "This transaction was signed by the TEE after fetching real-time internet data."
+            "success": True,
+            "contract_address": CONTRACT_ADDRESS,
+            "price_usd": price_usd,
+            "updated_at": updated_at,
+            "tx": signed,
+            "broadcast": BROADCAST_TX,
         }
     except Exception as e:
-        logger.error(f"Oracle demo failed: {e}")
+        logger.error(f"Oracle update-now failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+def _rpc_call(method: str, params: list) -> Any:
+    payload = {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
+    res = requests.post(RPC_URL, json=payload, timeout=15)
+    res.raise_for_status()
+    data = res.json()
+    if "error" in data:
+        raise RuntimeError(data["error"])
+    return data["result"]
+
+
+@router.get("/events/oracle")
+def get_oracle_events(lookback: int = 1000):
+    """Return oracle-related contract events for the last N blocks."""
+    if not CONTRACT_ADDRESS:
+        raise HTTPException(status_code=400, detail="Contract not configured. Set CONTRACT_ADDRESS or APP_CONTRACT_ADDRESS.")
+
+    current_block_hex = _rpc_call("eth_blockNumber", [])
+    current_block = int(current_block_hex, 16)
+    from_block = max(current_block - max(0, int(lookback)), 0)
+
+    # Topics
+    req_topic0 = "0x" + keccak(b"EthPriceUpdateRequested(uint256,address)").hex()
+    upd_topic0 = "0x" + keccak(b"EthPriceUpdated(uint256,uint256,uint256,uint256)").hex()
+
+    req_logs = _rpc_call(
+        "eth_getLogs",
+        [{
+            "fromBlock": hex(from_block),
+            "toBlock": hex(current_block),
+            "address": CONTRACT_ADDRESS,
+            "topics": [req_topic0],
+        }],
+    )
+
+    upd_logs = _rpc_call(
+        "eth_getLogs",
+        [{
+            "fromBlock": hex(from_block),
+            "toBlock": hex(current_block),
+            "address": CONTRACT_ADDRESS,
+            "topics": [upd_topic0],
+        }],
+    )
+
+    handled = {}
+    if app_state is not None:
+        handled = app_state.get("data", {}).get("oracle", {}).get("handled_requests", {}) or {}
+
+    def _parse_uint256(hex32: str) -> int:
+        return int(hex32, 16)
+
+    requests_out = []
+    for log in req_logs or []:
+        topics = log.get("topics", [])
+        request_id = _parse_uint256(topics[1]) if len(topics) > 1 else 0
+        requester = "0x" + topics[2][-40:] if len(topics) > 2 else None
+        requests_out.append({
+            "type": "EthPriceUpdateRequested",
+            "request_id": request_id,
+            "requester": requester,
+            "block_number": int(log.get("blockNumber", "0x0"), 16),
+            "tx_hash": log.get("transactionHash"),
+            "log_index": int(log.get("logIndex", "0x0"), 16),
+            "handled": str(request_id) in handled,
+        })
+
+    updates_out = []
+    for log in upd_logs or []:
+        topics = log.get("topics", [])
+        request_id = _parse_uint256(topics[1]) if len(topics) > 1 else 0
+        data_hex = (log.get("data") or "0x").replace("0x", "")
+        # data: priceUsd, updatedAt, blockNumber
+        price_usd = int(data_hex[0:64] or "0", 16) if len(data_hex) >= 64 else 0
+        updated_at = int(data_hex[64:128] or "0", 16) if len(data_hex) >= 128 else 0
+        block_number_emitted = int(data_hex[128:192] or "0", 16) if len(data_hex) >= 192 else 0
+        updates_out.append({
+            "type": "EthPriceUpdated",
+            "request_id": request_id,
+            "price_usd": price_usd,
+            "updated_at": updated_at,
+            "block_number_emitted": block_number_emitted,
+            "block_number": int(log.get("blockNumber", "0x0"), 16),
+            "tx_hash": log.get("transactionHash"),
+            "log_index": int(log.get("logIndex", "0x0"), 16),
+        })
+
+    events = sorted(requests_out + updates_out, key=lambda e: (e.get("block_number", 0), e.get("log_index", 0)))
+
+    return {
+        "contract_address": CONTRACT_ADDRESS,
+        "from_block": from_block,
+        "to_block": current_block,
+        "events": events,
+        "handled_requests": handled,
+    }
 
 
 # =============================================================================

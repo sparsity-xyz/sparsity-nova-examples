@@ -26,12 +26,13 @@ import json
 import logging
 import os
 from datetime import datetime
+from datetime import timezone
 from typing import Optional, TYPE_CHECKING, Dict, Any
 
 import requests
 from eth_hash.auto import keccak
 
-from chain import compute_state_hash, sign_update_state_hash
+from chain import compute_state_hash, sign_update_state_hash, sign_update_eth_price
 
 # Type hint for Odyn (actual import would cause circular dependency)
 if TYPE_CHECKING:
@@ -50,8 +51,16 @@ odyn: Optional["Odyn"] = None
 # =============================================================================
 RPC_URL = os.getenv("RPC_URL", "https://sepolia.base.org")
 CONTRACT_ADDRESS = os.getenv("CONTRACT_ADDRESS", "")
+APP_CONTRACT_ADDRESS = os.getenv("APP_CONTRACT_ADDRESS", "")
 CHAIN_ID = int(os.getenv("CHAIN_ID", "84532"))  # Base Sepolia
 BROADCAST_TX = os.getenv("BROADCAST_TX", "false").lower() == "true"
+
+ORACLE_PRICE_UPDATE_MINUTES = int(os.getenv("ORACLE_PRICE_UPDATE_MINUTES", "15"))
+ORACLE_EVENT_POLL_LOOKBACK_BLOCKS = int(os.getenv("ORACLE_EVENT_POLL_LOOKBACK_BLOCKS", "1000"))
+
+
+if not CONTRACT_ADDRESS and APP_CONTRACT_ADDRESS:
+    CONTRACT_ADDRESS = APP_CONTRACT_ADDRESS
 
 
 def init(state_ref: dict, odyn_ref: "Odyn"):
@@ -98,6 +107,51 @@ def fetch_external_data() -> Optional[dict]:
     except Exception as e:
         logger.warning(f"Failed to fetch external data: {e}")
         return None
+
+
+def fetch_eth_price_usd() -> int:
+    """Fetch ETH/USD spot price as integer USD (no decimals)."""
+    response = requests.get(
+        "https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd",
+        timeout=10,
+    )
+    response.raise_for_status()
+    return int(response.json()["ethereum"]["usd"])
+
+
+def update_eth_price_on_chain(*, request_id: int, reason: str) -> Dict[str, Any]:
+    if not (odyn and CONTRACT_ADDRESS):
+        raise RuntimeError("Oracle not configured (missing odyn or CONTRACT_ADDRESS)")
+
+    price_usd = fetch_eth_price_usd()
+    updated_at = int(datetime.now(tz=timezone.utc).timestamp())
+
+    signed = sign_update_eth_price(
+        odyn=odyn,
+        contract_address=CONTRACT_ADDRESS,
+        chain_id=CHAIN_ID,
+        rpc_url=RPC_URL,
+        request_id=request_id,
+        price_usd=price_usd,
+        updated_at=updated_at,
+        broadcast=BROADCAST_TX,
+    )
+
+    oracle_state = app_state.setdefault("data", {}).setdefault("oracle", {}) if app_state else {}
+    oracle_state["last_price_usd"] = price_usd
+    oracle_state["last_updated_at"] = updated_at
+    oracle_state["last_reason"] = reason
+    oracle_state["last_tx"] = signed
+    oracle_state["last_run"] = datetime.utcnow().isoformat() + "Z"
+
+    return {
+        "price_usd": price_usd,
+        "updated_at": updated_at,
+        "request_id": request_id,
+        "tx": signed,
+        "broadcast": BROADCAST_TX,
+        "contract_address": CONTRACT_ADDRESS,
+    }
 
 
 def update_state_hash_on_chain(state_hash: str) -> Optional[str]:
@@ -187,11 +241,7 @@ def background_task():
     except Exception as e:
         logger.error(f"Cron auto-save failed: {e}")
 
-    # --- Example 4: Poll on-chain events and respond ---
-    try:
-        poll_contract_events()
-    except Exception as e:
-        logger.warning(f"Event polling failed: {e}")
+    # On-chain event polling is scheduled separately (see app.py)
 
 
 
@@ -200,11 +250,10 @@ def background_task():
 # =============================================================================
 
 def poll_contract_events():
-    """
-    Poll for on-chain events and respond.
+    """Poll for on-chain events and respond.
 
-    This demo listens for StateUpdateRequested(bytes32,address) events
-    emitted by NovaAppBase and anchors the latest local state hash.
+    - Listens for StateUpdateRequested(bytes32,address) and anchors local state hash.
+    - Listens for EthPriceUpdateRequested(uint256,address) and updates ETH price on-chain.
     """
     if not (odyn and app_state and CONTRACT_ADDRESS):
         return
@@ -254,5 +303,55 @@ def poll_contract_events():
         )
         app_state["data"]["last_event_anchor_tx"] = signed
 
+    # ---------------------------------------------------------------------
+    # Oracle: EthPriceUpdateRequested(uint256,address)
+    # ---------------------------------------------------------------------
+    oracle_topic0 = "0x" + keccak(b"EthPriceUpdateRequested(uint256,address)").hex()
+
+    oracle_logs = rpc_call(
+        "eth_getLogs",
+        [{
+            "fromBlock": hex(max(current_block - ORACLE_EVENT_POLL_LOOKBACK_BLOCKS, 0)),
+            "toBlock": hex(current_block),
+            "address": CONTRACT_ADDRESS,
+            "topics": [oracle_topic0],
+        }],
+    )
+
+    oracle_state = app_state.setdefault("data", {}).setdefault("oracle", {})
+    handled = oracle_state.setdefault("handled_requests", {})
+
+    for log in oracle_logs or []:
+        try:
+            request_id_hex = log.get("topics", [None, None])[1]
+            if not request_id_hex:
+                continue
+            request_id = int(request_id_hex, 16)
+            request_id_key = str(request_id)
+            if request_id_key in handled:
+                continue
+
+            result = update_eth_price_on_chain(request_id=request_id, reason="onchain_event")
+            handled[request_id_key] = {
+                "handled_at": datetime.utcnow().isoformat() + "Z",
+                "tx": result.get("tx"),
+                "price_usd": result.get("price_usd"),
+                "updated_at": result.get("updated_at"),
+            }
+        except Exception as e:
+            logger.warning(f"Failed handling oracle request log: {e}")
+
     app_state["data"]["last_processed_block"] = current_block
+
+
+def oracle_periodic_update():
+    """Periodic ETH price update (default every 15 minutes)."""
+    if app_state is None:
+        return
+    try:
+        update_eth_price_on_chain(request_id=0, reason="periodic")
+    except Exception as e:
+        oracle_state = app_state.setdefault("data", {}).setdefault("oracle", {})
+        oracle_state["last_error"] = str(e)
+        logger.warning(f"Periodic oracle update failed: {e}")
 

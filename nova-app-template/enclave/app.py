@@ -8,26 +8,27 @@ This is the main entry point for your Nova TEE application.
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │  DO NOT MODIFY THIS FILE                                                    │
 │  Instead, add your business logic to:                                       │
-│    - routes.py  → Custom API endpoints                                      │
+│    - routes.py  → API endpoints (public + /api)                             │
 │    - tasks.py   → Background jobs / cron tasks                              │
 └─────────────────────────────────────────────────────────────────────────────┘
 
 Architecture:
     ┌──────────────┐     ┌──────────────┐     ┌──────────────┐
     │   routes.py  │     │   tasks.py   │     │   odyn.py    │
-    │  (User APIs) │     │  (User Cron) │     │ (Platform)   │
+    │ Public + /api│     │  (User Cron) │     │ (Platform)   │
     └──────┬───────┘     └──────┬───────┘     └──────┬───────┘
-           │                    │                    │
-           └────────────────────┼────────────────────┘
-                                │
-                         ┌──────┴───────┐
-                         │    app.py    │
-                         │  (Framework) │
-                         └──────────────┘
+        │                    │                    │
+        └────────────────────┼────────────────────┘
+                    │
+                ┌──────┴───────┐
+                │    app.py    │
+                │  (Framework) │
+                └──────────────┘
 """
 
 import logging
 import json
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -59,17 +60,32 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Enable CORS for all origins (required for frontend dev server at :3000)
+# =============================================================================
+# CORS Configuration
+# =============================================================================
+# Allow API access from frontends hosted on different domains.
+# Configure allowed origins via CORS_ORIGINS env (comma-separated) or "*".
+# If "*", any Origin is matched (via regex) so arbitrary hosts can call the API.
+# Set CORS_ALLOW_CREDENTIALS to enable cookies/authorization for cross-origin requests.
+cors_origins_env = os.getenv("CORS_ORIGINS", "*")
+cors_allow_credentials = os.getenv("CORS_ALLOW_CREDENTIALS", "true").lower() in ("1", "true", "yes")
+
+cors_origins = [o.strip() for o in cors_origins_env.split(",") if o.strip()]
+if not cors_origins:
+    cors_origins = ["*"]
+
+allow_all_origins = "*" in cors_origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=[] if allow_all_origins else cors_origins,
+    allow_origin_regex=".*" if allow_all_origins else None,
+    allow_credentials=cors_allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # =============================================================================
-# Frontend Static Files
+# Frontend Static Files (optional, for bundled static UI)
 # =============================================================================
 FRONTEND_DIR = Path(__file__).parent / "frontend-dist"
 
@@ -104,6 +120,7 @@ class AppStatus(BaseModel):
     """Response model for /status endpoint."""
     status: str
     eth_address: Optional[str] = None
+    contract_address: Optional[str] = None
     cron_info: Optional[dict] = None
     last_state_hash: Optional[str] = None
 
@@ -117,9 +134,15 @@ def get_status():
     """Get TEE identity and cron status."""
     try:
         address = odyn.eth_address()
+
+        contract_address = os.getenv("CONTRACT_ADDRESS", "")
+        if not contract_address:
+            contract_address = os.getenv("APP_CONTRACT_ADDRESS", "")
+
         return AppStatus(
             status="running",
             eth_address=address,
+            contract_address=contract_address or None,
             cron_info={
                 "counter": app_state["cron_counter"],
                 "last_run": app_state["last_cron_run"]
@@ -136,6 +159,12 @@ def get_status():
 # Modify the interval in scheduler.add_job() if needed
 scheduler = BackgroundScheduler()
 scheduler.add_job(tasks.background_task, 'interval', minutes=5)
+
+# Poll on-chain events more frequently for near-real-time reactions
+scheduler.add_job(tasks.poll_contract_events, 'interval', seconds=30)
+
+# Periodic oracle price update (default every 15 minutes)
+scheduler.add_job(tasks.oracle_periodic_update, 'interval', minutes=tasks.ORACLE_PRICE_UPDATE_MINUTES)
 
 # =============================================================================
 # Application Lifecycle

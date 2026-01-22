@@ -1,66 +1,77 @@
-## Foundry
+## Nova App Contract Deployment Flow
 
-**Foundry is a blazing fast, portable and modular toolkit for Ethereum application development written in Rust.**
+To work with the Nova Registry, your app contract must implement
+`ISparsityApp` and expose `registerTEEWallet(address)`.
 
-Foundry consists of:
+Recommended flow (Foundry-based):
 
-- **Forge**: Ethereum testing framework (like Truffle, Hardhat and DappTools).
-- **Cast**: Swiss army knife for interacting with EVM smart contracts, sending transactions and getting chain data.
-- **Anvil**: Local Ethereum node, akin to Ganache, Hardhat Network.
-- **Chisel**: Fast, utilitarian, and verbose solidity REPL.
+1. **Deploy the app contract** (must extend [src/ISparsityApp.sol](src/ISparsityApp.sol)).
+2. **Verify the contract** on Base Sepolia (or your target chain).
+3. **Set the Nova Registry address** by calling `setNovaRegistry(address)` on your app contract.
+4. **Create the app on Nova Platform** and provide the app contract address.
+5. **ZKP Registration Service** generates proofs and registers/verifies the app in the Nova Registry.
+6. **Nova Registry** calls `registerTEEWallet` on your app contract.
 
-## Documentation
+Notes:
+- `registerTEEWallet` is **registry-only** in the template base contract.
+- Registry address must be set before registration can succeed.
 
-https://book.getfoundry.sh/
+### Step 1: Deploy the App Contract
 
-## Usage
-
-### Build
+Install dependencies and run a quick sanity check before deploying (you must install `forge-std` explicitly):
 
 ```shell
-$ forge build
+cd nova-app-template/contracts
+forge install foundry-rs/forge-std
+forge build
+forge test
 ```
 
-### Test
+Then deploy using the included Foundry script:
 
 ```shell
-$ forge test
+export RPC_URL=https://sepolia.base.org
+export PRIVATE_KEY=<your_private_key>
+
+# Deploy NovaAppBase
+forge script script/Deploy.s.sol:DeployScript \
+	--rpc-url "$RPC_URL" \
+	--private-key "$PRIVATE_KEY" \
+	--broadcast
 ```
 
-### Format
+Save the deployed contract address from the output as `APP_CONTRACT` for the next steps.
+
+### Step 2: Verify the Contract (Base Sepolia)
+
+If you use Base Sepolia, you can verify with Etherscan-style APIs.
+You will need an API key and the deployed address:
 
 ```shell
-$ forge fmt
+export APP_CONTRACT=<deployed_contract_address>
+export ETHERSCAN_API_KEY=<your_etherscan_or_basescan_key>
+
+# Example for Base Sepolia (chain-id 84532)
+forge verify-contract \
+	--chain-id 84532 \
+	--watch \
+	--etherscan-api-key "$ETHERSCAN_API_KEY" \
+	"$APP_CONTRACT" \
+	src/NovaAppBase.sol:NovaAppBase
 ```
 
-### Gas Snapshots
+If your chain uses a different explorer, pass `--verifier-url` and `--verifier` as needed.
+
+### Step 3: Set the Nova Registry Address
+
+Call `setNovaRegistry(address)` on the deployed contract:
 
 ```shell
-$ forge snapshot
-```
+export NOVA_REGISTRY=<nova_registry_contract_address>
 
-### Anvil
-
-```shell
-$ anvil
-```
-
-### Deploy
-
-```shell
-$ forge script script/Counter.s.sol:CounterScript --rpc-url <your_rpc_url> --private-key <your_private_key>
-```
-
-### Cast
-
-```shell
-$ cast <subcommand>
-```
-
-### Help
-
-```shell
-$ forge --help
-$ anvil --help
-$ cast --help
+cast send "$APP_CONTRACT" \
+	"setNovaRegistry(address)" \
+	"$NOVA_REGISTRY" \
+	--rpc-url "$RPC_URL" \
+	--private-key "$PRIVATE_KEY"
 ```
