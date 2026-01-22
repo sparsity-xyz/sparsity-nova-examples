@@ -28,7 +28,6 @@ Architecture:
 
 import logging
 import json
-import json
 from pathlib import Path
 from typing import Optional
 
@@ -37,6 +36,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
+from fastapi.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.background import BackgroundScheduler
 
 # Platform & User Components
@@ -57,6 +57,15 @@ app = FastAPI(
     title="Nova App",
     description="A verifiable TEE application on Nova Platform",
     version="1.0.0"
+)
+
+# Enable CORS for all origins (required for frontend dev server at :3000)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # =============================================================================
@@ -144,7 +153,8 @@ def startup_event():
     tasks.init(app_state, odyn)
     routes.init(app_state, odyn)
     
-    # 2. Register user routes (prefix: /api)
+    # 2. Register user routes (prefix: /api) and public routes
+    app.include_router(routes.public_router)
     app.include_router(routes.router)
     
     # 3. Load persisted state from S3

@@ -43,7 +43,7 @@ sequenceDiagram
     
     rect rgb(240, 240, 240)
         Note over U,NR: Phase 1: Identity & Handshake (RA-TLS)
-        U->>E: GET /api/attestation
+        U->>E: POST /.well-known/attestation
         E-->>U: Attestation Doc + Public Key
         U->>NR: Verify PCRs / Fetch ZKP
         NR-->>U: Verification Result + Proof
@@ -100,6 +100,7 @@ def compute(req: Data):
 Ideal for Oracles or state sync.
 - **Oracle Pattern**: Fetch internet data (`requests.get`) -> Process -> Sign Tx -> Push to Chain.
 - **State Hashing**: Periodically hash your S3 state and update the on-chain `stateHash`.
+- **Event Listener**: Poll `StateUpdateRequested` events and respond with a signed on-chain update.
 
 ---
 

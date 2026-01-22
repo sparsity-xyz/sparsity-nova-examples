@@ -24,6 +24,9 @@ contract NovaAppBase {
     /// @notice Emitted when state hash is updated
     event StateUpdated(bytes32 indexed newHash, uint256 blockNumber);
 
+    /// @notice Emitted when an external party requests a state update
+    event StateUpdateRequested(bytes32 indexed requestedHash, address indexed requester);
+
     /// @notice Emitted when TEE wallet is registered
     event TeeWalletRegistered(address indexed wallet);
 
@@ -77,6 +80,15 @@ contract NovaAppBase {
         lastUpdatedBlock = block.number;
 
         emit StateUpdated(_newHash, block.number);
+    }
+
+    /**
+     * @notice Emit a request to update state hash (off-chain trigger)
+     * @param requestedHash Optional expected hash (can be zero)
+     * @dev The enclave listens for this event and responds by updating state
+     */
+    function requestStateUpdate(bytes32 requestedHash) external {
+        emit StateUpdateRequested(requestedHash, msg.sender);
     }
 
     /**

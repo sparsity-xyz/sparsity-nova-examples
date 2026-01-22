@@ -10,3 +10,11 @@ secured-chat-bot/frontend/out
 random-number-generator-frontend/node_modules
 random-number-generator-frontend/dist
 
+nova-app-template/enclave/.venv
+nova-app-template/enclave/__pycache__
+nova-app-template/frontend/.next
+nova-app-template/frontend/node_modules
+nova-app-template/frontend/out
+
+
+

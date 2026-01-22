@@ -23,14 +23,14 @@ Available Methods:
     odyn.s3_list(prefix)    → List keys in S3 storage
 
 Environment:
-    IN_ENCLAVE=true   → Uses localhost:8080 (production TEE)
+    IN_ENCLAVE=true   → Uses localhost:18000 (production TEE)
     IN_ENCLAVE=false  → Uses mock API (development)
 """
 
 import base64
 import json
 import os
-from typing import Dict, Any, Optional, Tuple, List
+from typing import Dict, Any, Optional, Tuple, List, Union
 
 import requests
 
@@ -40,7 +40,7 @@ class Odyn:
     Wrapper for enclaver's Odyn API.
     
     Automatically detects environment via IN_ENCLAVE env var:
-      - IN_ENCLAVE=true  → Production (localhost:8080)
+    - IN_ENCLAVE=true  → Production (localhost:18000)
       - IN_ENCLAVE=false → Development (mock API)
     """
     
@@ -131,7 +131,7 @@ class Odyn:
             random_hex = random_hex[2:]
         return bytes.fromhex(random_hex)
 
-    def get_attestation(self, nonce: Optional[str] = "") -> bytes:
+    def get_attestation(self, nonce: Optional[str] = "", user_data: Optional[Union[str, bytes]] = None) -> bytes:
         """
         Get a Nitro attestation document.
         
@@ -139,13 +139,27 @@ class Odyn:
         AWS Nitro Enclave with specific PCR measurements.
         
         Args:
-            nonce: Optional nonce to include in attestation
+            nonce: Optional base64-encoded nonce to include in attestation
+            user_data: Optional user data to embed (bytes or base64-encoded string)
             
         Returns:
             CBOR-encoded attestation document
         """
         url = f"{self.endpoint}/v1/attestation"
-        res = requests.post(url, json={"nonce": nonce}, timeout=10)
+        payload: Dict[str, Any] = {"nonce": nonce or ""}
+        # Include enclave encryption public key (PEM) for RA-TLS binding
+        try:
+            enc_pub = self.get_encryption_public_key()
+            if "public_key_pem" in enc_pub:
+                payload["public_key"] = enc_pub["public_key_pem"]
+        except Exception:
+            pass
+        if user_data is not None:
+            if isinstance(user_data, bytes):
+                payload["user_data"] = base64.b64encode(user_data).decode("utf-8")
+            else:
+                payload["user_data"] = user_data
+        res = requests.post(url, json=payload, timeout=10)
         res.raise_for_status()
         return res.content
 
@@ -162,6 +176,14 @@ class Odyn:
         """
         return self._call("GET", "/v1/encryption/public_key")
 
+    def get_encryption_public_key_der(self) -> bytes:
+        """Get the encryption public key in DER format (bytes)."""
+        pub_data = self.get_encryption_public_key()
+        pub_key_hex = pub_data.get("public_key_der", "")
+        if pub_key_hex.startswith("0x"):
+            pub_key_hex = pub_key_hex[2:]
+        return bytes.fromhex(pub_key_hex)
+
     def encrypt(self, plaintext: str, client_public_key: str) -> dict:
         """
         Encrypt data to send to a client using ECDH + AES-256-GCM.
@@ -173,6 +195,8 @@ class Odyn:
         Returns:
             Dict with encrypted_data, enclave_public_key, and nonce
         """
+        if not client_public_key.startswith("0x"):
+            client_public_key = f"0x{client_public_key}"
         payload = {"plaintext": plaintext, "client_public_key": client_public_key}
         return self._call("POST", "/v1/encryption/encrypt", payload)
 
@@ -188,6 +212,21 @@ class Odyn:
         Returns:
             Decrypted plaintext string
         """
+        # Odyn expects nonce >= 12 bytes; trim if longer
+        nonce_hex = nonce[2:] if nonce.startswith("0x") else nonce
+        try:
+            nonce_bytes = bytes.fromhex(nonce_hex)
+            if len(nonce_bytes) > 12:
+                nonce_hex = nonce_bytes[:12].hex()
+        except Exception:
+            nonce_hex = nonce_hex[:24]
+        nonce = f"0x{nonce_hex}"
+        if not nonce.startswith("0x"):
+            nonce = f"0x{nonce}"
+        if not client_public_key.startswith("0x"):
+            client_public_key = f"0x{client_public_key}"
+        if not encrypted_data.startswith("0x"):
+            encrypted_data = f"0x{encrypted_data}"
         payload = {
             "nonce": nonce,
             "client_public_key": client_public_key,
@@ -199,7 +238,7 @@ class Odyn:
     # S3 Storage (via Enclaver internal API)
     # =========================================================================
     
-    def s3_put(self, key: str, value: bytes) -> bool:
+    def s3_put(self, key: str, value: bytes, content_type: Optional[str] = None) -> bool:
         """
         Store data in S3 storage.
         
@@ -214,6 +253,8 @@ class Odyn:
             True if successful
         """
         payload = {"key": key, "value": base64.b64encode(value).decode()}
+        if content_type:
+            payload["content_type"] = content_type
         res = requests.post(f"{self.endpoint}/v1/s3/put", json=payload, timeout=30)
         res.raise_for_status()
         return res.json().get("success", False)
@@ -248,19 +289,33 @@ class Odyn:
         res.raise_for_status()
         return res.json().get("success", False)
 
-    def s3_list(self, prefix: str = "") -> List[str]:
+    def s3_list(
+        self,
+        prefix: Optional[str] = None,
+        continuation_token: Optional[str] = None,
+        max_keys: Optional[int] = None
+    ) -> Dict[str, Any]:
         """
         List keys in S3 storage.
         
         Args:
             prefix: Optional prefix to filter keys (e.g., "data/")
+            continuation_token: Token from a previous list response
+            max_keys: Optional maximum number of keys to return
             
         Returns:
-            List of matching keys
+            Dict with keys, continuation_token, and is_truncated
         """
-        res = requests.post(f"{self.endpoint}/v1/s3/list", json={"prefix": prefix}, timeout=30)
+        payload: Dict[str, Any] = {}
+        if prefix is not None:
+            payload["prefix"] = prefix
+        if continuation_token is not None:
+            payload["continuation_token"] = continuation_token
+        if max_keys is not None:
+            payload["max_keys"] = max_keys
+        res = requests.post(f"{self.endpoint}/v1/s3/list", json=payload, timeout=30)
         res.raise_for_status()
-        return res.json().get("keys", [])
+        return res.json()
 
 
 # =============================================================================

@@ -32,8 +32,10 @@ import base64
 from typing import Optional, Dict, Any, TYPE_CHECKING
 
 import requests
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Body, Response
 from pydantic import BaseModel
+
+from chain import compute_state_hash, sign_update_state_hash
 
 # Type hint for Odyn (actual import would cause circular dependency)
 if TYPE_CHECKING:
@@ -68,6 +70,7 @@ def init(state_ref: dict, odyn_ref: "Odyn"):
 # Router Configuration
 # =============================================================================
 router = APIRouter(prefix="/api", tags=["user"])
+public_router = APIRouter(tags=["public"])
 
 
 # =============================================================================
@@ -83,6 +86,7 @@ class EchoResponse(BaseModel):
 class StorageRequest(BaseModel):
     key: str
     value: Any
+    content_type: Optional[str] = None
 
 class ContractWriteRequest(BaseModel):
     """Request to update state hash on contract."""
@@ -103,6 +107,11 @@ class DecryptRequest(BaseModel):
     nonce: str
     client_public_key: str
     encrypted_data: str
+
+class EncryptedPayload(BaseModel):
+    nonce: str
+    public_key: str
+    data: str
 
 
 # =============================================================================
@@ -125,6 +134,25 @@ def get_attestation(nonce: str = ""):
     try:
         attestation = odyn.get_attestation(nonce)
         return {"attestation": base64.b64encode(attestation).decode()}
+    except Exception as e:
+        logger.error(f"Failed to get attestation: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@public_router.post("/.well-known/attestation")
+def well_known_attestation(body: Dict[str, Any] = Body(default_factory=dict)):
+    """
+    Public RA-TLS endpoint for frontend attestation fetch.
+
+    Returns raw CBOR attestation document.
+    """
+    if not odyn:
+        raise HTTPException(status_code=500, detail="Odyn not initialized")
+
+    try:
+        nonce = body.get("nonce", "") if isinstance(body, dict) else ""
+        attestation = odyn.get_attestation(nonce)
+        return Response(content=attestation, media_type="application/cbor")
     except Exception as e:
         logger.error(f"Failed to get attestation: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -201,18 +229,35 @@ def decrypt_data(req: DecryptRequest):
 # Demo Endpoints
 # =============================================================================
 
-@router.post("/echo", response_model=EchoResponse)
-def echo_example(req: EchoRequest):
-    """Echo back a message with TEE address."""
+@router.post("/echo")
+def echo_example(payload: Dict[str, Any] = Body(...)):
+    """Echo back a message with TEE address (supports encrypted payloads)."""
+    if not odyn:
+        raise HTTPException(status_code=500, detail="Odyn not initialized")
+
     try:
-        address = odyn.eth_address() if odyn else "unknown"
-    except:
+        address = odyn.eth_address()
+    except Exception:
         address = "unavailable"
-    
-    return EchoResponse(
-        reply=f"Echo: {req.message}",
-        tee_address=address
-    )
+
+    # Encrypted flow: {nonce, public_key, data}
+    if {"nonce", "public_key", "data"}.issubset(payload.keys()):
+        enc = EncryptedPayload(**payload)
+        plaintext = odyn.decrypt(enc.nonce, enc.public_key, enc.data)
+        req = EchoRequest(**json.loads(plaintext))
+        response = {"reply": f"Echo: {req.message}", "tee_address": address}
+        encrypted = odyn.encrypt(json.dumps(response), enc.public_key)
+        return {
+            "data": {
+                "encrypted_data": encrypted.get("encrypted_data"),
+                "nonce": encrypted.get("nonce"),
+                "public_key": encrypted.get("enclave_public_key"),
+            }
+        }
+
+    # Plaintext flow
+    req = EchoRequest(**payload)
+    return EchoResponse(reply=f"Echo: {req.message}", tee_address=address)
 
 
 @router.get("/info")
@@ -282,17 +327,37 @@ def save_to_storage(req: StorageRequest):
         json_bytes = json.dumps(req.value).encode('utf-8')
         
         # Save to S3
-        success = odyn.s3_put(req.key, json_bytes)
+        success = odyn.s3_put(req.key, json_bytes, content_type=req.content_type)
         
         # Also update in-memory state
         if app_state:
             app_state["data"][req.key] = req.value
         
-        return {
+        result: Dict[str, Any] = {
             "success": success,
             "key": req.key,
-            "message": f"Data saved to S3 storage"
+            "message": "Data saved to S3 storage"
         }
+
+        # Anchor updated state hash on-chain (optional)
+        if success and app_state and ANCHOR_ON_WRITE and CONTRACT_ADDRESS:
+            state_hash = compute_state_hash(app_state["data"])
+            app_state["data"]["last_state_hash"] = state_hash
+            try:
+                anchor = sign_update_state_hash(
+                    odyn=odyn,
+                    contract_address=CONTRACT_ADDRESS,
+                    chain_id=CHAIN_ID,
+                    rpc_url=RPC_URL,
+                    state_hash=state_hash,
+                    broadcast=BROADCAST_TX,
+                )
+                result["state_hash"] = state_hash
+                result["anchor_tx"] = anchor
+            except Exception as e:
+                result["anchor_error"] = str(e)
+
+        return result
     except Exception as e:
         logger.error(f"Failed to save to storage: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -338,10 +403,13 @@ def list_storage():
         raise HTTPException(status_code=500, detail="Odyn not initialized")
     
     try:
-        keys = odyn.s3_list()
+        res = odyn.s3_list()
+        keys = res.get("keys", []) if isinstance(res, dict) else res
         return {
             "keys": keys,
-            "count": len(keys)
+            "count": len(keys),
+            "continuation_token": res.get("continuation_token") if isinstance(res, dict) else None,
+            "is_truncated": res.get("is_truncated") if isinstance(res, dict) else False
         }
     except Exception as e:
         logger.error(f"Failed to list storage: {e}")
@@ -381,6 +449,8 @@ def delete_from_storage(key: str):
 CONTRACT_ADDRESS = os.getenv("CONTRACT_ADDRESS", "")
 RPC_URL = os.getenv("RPC_URL", "https://sepolia.base.org")
 CHAIN_ID = int(os.getenv("CHAIN_ID", "84532"))  # Base Sepolia
+BROADCAST_TX = os.getenv("BROADCAST_TX", "false").lower() == "true"
+ANCHOR_ON_WRITE = os.getenv("ANCHOR_ON_WRITE", "true").lower() == "true"
 
 
 @router.get("/contract")
@@ -430,37 +500,23 @@ def update_contract_state(req: ContractWriteRequest):
         )
     
     try:
-        # Function selector for updateStateHash(bytes32)
-        # keccak256("updateStateHash(bytes32)")[:4] = 0x9f0e2260
-        function_selector = "0x9f0e2260"
-        
-        # Encode the state hash (padded to 32 bytes)
-        state_hash = req.state_hash.replace("0x", "").zfill(64)
-        call_data = f"{function_selector}{state_hash}"
-        
-        # Build EIP-1559 transaction
-        tx = {
-            "kind": "structured",
-            "chain_id": hex(CHAIN_ID),
-            "nonce": "0x0",  # Should be fetched from RPC in production
-            "max_priority_fee_per_gas": "0x5F5E100",  # 0.1 gwei
-            "max_fee_per_gas": "0xB2D05E00",  # 3 gwei
-            "gas_limit": "0x30D40",  # 200,000 gas
-            "to": CONTRACT_ADDRESS,
-            "value": "0x0",
-            "data": call_data
-        }
-        
-        # Sign with TEE key
-        signed = odyn.sign_tx(tx)
-        
+        signed = sign_update_state_hash(
+            odyn=odyn,
+            contract_address=CONTRACT_ADDRESS,
+            chain_id=CHAIN_ID,
+            rpc_url=RPC_URL,
+            state_hash=req.state_hash,
+            broadcast=BROADCAST_TX,
+        )
         return {
             "success": True,
             "raw_transaction": signed["raw_transaction"],
             "transaction_hash": signed["transaction_hash"],
             "from_address": signed["address"],
             "to_address": CONTRACT_ADDRESS,
-            "note": "Submit raw_transaction to RPC endpoint to execute"
+            "broadcasted": signed.get("broadcasted"),
+            "rpc_tx_hash": signed.get("rpc_tx_hash"),
+            "note": "Submit raw_transaction to RPC endpoint to execute" if not BROADCAST_TX else "Broadcast attempted"
         }
     except Exception as e:
         logger.error(f"Failed to sign transaction: {e}")

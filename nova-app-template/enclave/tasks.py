@@ -26,10 +26,12 @@ import json
 import logging
 import os
 from datetime import datetime
-from typing import Optional, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING, Dict, Any
 
 import requests
 from eth_hash.auto import keccak
+
+from chain import compute_state_hash, sign_update_state_hash
 
 # Type hint for Odyn (actual import would cause circular dependency)
 if TYPE_CHECKING:
@@ -49,6 +51,7 @@ odyn: Optional["Odyn"] = None
 RPC_URL = os.getenv("RPC_URL", "https://sepolia.base.org")
 CONTRACT_ADDRESS = os.getenv("CONTRACT_ADDRESS", "")
 CHAIN_ID = int(os.getenv("CHAIN_ID", "84532"))  # Base Sepolia
+BROADCAST_TX = os.getenv("BROADCAST_TX", "false").lower() == "true"
 
 
 def init(state_ref: dict, odyn_ref: "Odyn"):
@@ -70,11 +73,6 @@ def init(state_ref: dict, odyn_ref: "Odyn"):
 # =============================================================================
 # Helper Functions
 # =============================================================================
-
-def compute_state_hash(data: dict) -> str:
-    """Compute keccak256 hash of state data for on-chain compatibility."""
-    json_bytes = json.dumps(data, sort_keys=True).encode('utf-8')
-    return "0x" + keccak(json_bytes).hex()
 
 
 def fetch_external_data() -> Optional[dict]:
@@ -116,25 +114,16 @@ def update_state_hash_on_chain(state_hash: str) -> Optional[str]:
         return None
     
     try:
-        # Function selector for updateStateHash(bytes32)
-        function_selector = "0x9f0e2260"
-        call_data = f"{function_selector}{state_hash[2:].zfill(64)}"
-        
-        tx = {
-            "kind": "structured",
-            "chain_id": hex(CHAIN_ID),
-            "nonce": "0x0",  # Should be fetched from RPC in production
-            "max_priority_fee_per_gas": "0x5F5E100",
-            "max_fee_per_gas": "0xB2D05E00",
-            "gas_limit": "0x30D40",
-            "to": CONTRACT_ADDRESS,
-            "value": "0x0",
-            "data": call_data
-        }
-        
-        signed = odyn.sign_tx(tx)
+        signed = sign_update_state_hash(
+            odyn=odyn,
+            contract_address=CONTRACT_ADDRESS,
+            chain_id=CHAIN_ID,
+            rpc_url=RPC_URL,
+            state_hash=state_hash,
+            broadcast=BROADCAST_TX,
+        )
         logger.info(f"Signed state hash update tx: {signed['transaction_hash']}")
-        return signed["raw_transaction"]
+        return signed.get("raw_transaction")
     except Exception as e:
         logger.error(f"Failed to sign state hash tx: {e}")
         return None
@@ -190,13 +179,19 @@ def background_task():
                 logger.info(f"State hash: {state_hash}")
                 
                 # Optionally sign tx for on-chain update (don't broadcast here)
-                # raw_tx = update_state_hash_on_chain(state_hash)
-                # if raw_tx:
-                #     app_state["data"]["pending_tx"] = raw_tx
+                raw_tx = update_state_hash_on_chain(state_hash)
+                if raw_tx:
+                    app_state["data"]["pending_tx"] = raw_tx
             else:
                 logger.warning("State save returned False")
     except Exception as e:
         logger.error(f"Cron auto-save failed: {e}")
+
+    # --- Example 4: Poll on-chain events and respond ---
+    try:
+        poll_contract_events()
+    except Exception as e:
+        logger.warning(f"Event polling failed: {e}")
 
 
 
@@ -206,36 +201,58 @@ def background_task():
 
 def poll_contract_events():
     """
-    Example: Poll for on-chain events and respond.
-    
-    In a real implementation, you would:
-    1. Track the last processed block
-    2. Query for new events since that block
-    3. Process events and update state
-    4. Sign response transactions
-    
-    This requires web3.py for full implementation.
+    Poll for on-chain events and respond.
+
+    This demo listens for StateUpdateRequested(bytes32,address) events
+    emitted by NovaAppBase and anchors the latest local state hash.
     """
-    # Example pattern (requires web3.py):
-    #
-    # from web3 import Web3
-    # w3 = Web3(Web3.HTTPProvider(RPC_URL))
-    # 
-    # contract = w3.eth.contract(address=CONTRACT_ADDRESS, abi=ABI)
-    # 
-    # last_block = app_state["data"].get("last_processed_block", 0)
-    # current_block = w3.eth.block_number
-    # 
-    # events = contract.events.RequestCreated.get_logs(
-    #     fromBlock=last_block + 1,
-    #     toBlock=current_block
-    # )
-    # 
-    # for event in events:
-    #     request_id = event.args.requestId
-    #     # Process event and sign response
-    #     ...
-    # 
-    # app_state["data"]["last_processed_block"] = current_block
-    pass
+    if not (odyn and app_state and CONTRACT_ADDRESS):
+        return
+
+    def rpc_call(method: str, params: list) -> Any:
+        payload = {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
+        res = requests.post(RPC_URL, json=payload, timeout=15)
+        res.raise_for_status()
+        data = res.json()
+        if "error" in data:
+            raise RuntimeError(data["error"])
+        return data["result"]
+
+    current_block_hex = rpc_call("eth_blockNumber", [])
+    current_block = int(current_block_hex, 16)
+
+    last_block = app_state["data"].get("last_processed_block")
+    if last_block is None:
+        last_block = max(current_block - 1, 0)
+
+    # Event signature: StateUpdateRequested(bytes32,address)
+    topic0 = "0x" + keccak(b"StateUpdateRequested(bytes32,address)").hex()
+
+    logs = rpc_call(
+        "eth_getLogs",
+        [{
+            "fromBlock": hex(last_block + 1),
+            "toBlock": hex(current_block),
+            "address": CONTRACT_ADDRESS,
+            "topics": [topic0],
+        }],
+    )
+
+    if logs:
+        app_state["data"]["last_event_count"] = app_state["data"].get("last_event_count", 0) + len(logs)
+
+        state_hash = compute_state_hash(app_state.get("data", {}))
+        app_state["data"]["last_state_hash"] = state_hash
+
+        signed = sign_update_state_hash(
+            odyn=odyn,
+            contract_address=CONTRACT_ADDRESS,
+            chain_id=CHAIN_ID,
+            rpc_url=RPC_URL,
+            state_hash=state_hash,
+            broadcast=BROADCAST_TX,
+        )
+        app_state["data"]["last_event_anchor_tx"] = signed
+
+    app_state["data"]["last_processed_block"] = current_block
 
