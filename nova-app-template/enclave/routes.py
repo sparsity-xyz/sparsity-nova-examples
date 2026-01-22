@@ -22,12 +22,13 @@ Demo endpoints included:
     - POST /api/storage    → Save key-value data to S3 storage
     - GET  /api/storage    → Load key-value data from S3 storage
     - GET  /api/contract   → Read contract state (stateHash)
-    - POST /api/contract   → Write to contract (updateStateHash)
+    - POST /api/contract/update-state → Write to contract (updateStateHash)
+    - POST /api/oracle/update-now     → Fetch ETH/USD and update on-chain price
+    - GET  /api/events/oracle         → Fetch oracle-related on-chain events
 """
 
 import json
 import logging
-import os
 import base64
 from datetime import datetime
 from typing import Optional, Dict, Any, TYPE_CHECKING
@@ -462,8 +463,8 @@ def delete_from_storage(key: str):
 # Contract Interaction Demo
 # =============================================================================
 
-# Contract configuration (set via environment variables)
-# See config.py for all configuration sources and defaults.
+# Contract configuration
+# This template uses static constants in config.py (per-request: no env var reads).
 
 
 @router.get("/contract")
@@ -479,7 +480,7 @@ def read_contract():
     if not CONTRACT_ADDRESS:
         return {
             "error": "Contract not configured",
-            "hint": "Set CONTRACT_ADDRESS environment variable"
+            "hint": "Set CONTRACT_ADDRESS in enclave/config.py"
         }
     
     # Note: For full contract reads, you would use web3.py or similar
@@ -509,7 +510,7 @@ def update_contract_state(req: ContractWriteRequest):
     if not CONTRACT_ADDRESS:
         raise HTTPException(
             status_code=400, 
-            detail="Contract not configured. Set CONTRACT_ADDRESS env var."
+            detail="Contract not configured. Set CONTRACT_ADDRESS in enclave/config.py."
         )
     
     try:
@@ -554,14 +555,14 @@ def get_oracle_price_tx():
 def update_oracle_price_now():
     """Fetch ETH/USD and update the on-chain app contract via updateEthPrice.
 
-    - If BROADCAST_TX=true, the enclave will attempt to send the tx via RPC.
+    - If BROADCAST_TX is True, the enclave will attempt to send the tx via RPC.
     - Otherwise returns a raw signed tx for the caller to broadcast.
     """
     if not odyn:
         raise HTTPException(status_code=500, detail="Odyn not initialized")
 
     if not CONTRACT_ADDRESS:
-        raise HTTPException(status_code=400, detail="Contract not configured. Set CONTRACT_ADDRESS or APP_CONTRACT_ADDRESS.")
+        raise HTTPException(status_code=400, detail="Contract not configured. Set CONTRACT_ADDRESS in enclave/config.py.")
 
     try:
         res = requests.get(
@@ -618,7 +619,7 @@ def _rpc_call(method: str, params: list) -> Any:
 def get_oracle_events(lookback: int = 1000):
     """Return oracle-related contract events for the last N blocks."""
     if not CONTRACT_ADDRESS:
-        raise HTTPException(status_code=400, detail="Contract not configured. Set CONTRACT_ADDRESS or APP_CONTRACT_ADDRESS.")
+        raise HTTPException(status_code=400, detail="Contract not configured. Set CONTRACT_ADDRESS in enclave/config.py.")
 
     current_block_hex = _rpc_call("eth_blockNumber", [])
     current_block = int(current_block_hex, 16)

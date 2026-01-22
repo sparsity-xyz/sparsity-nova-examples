@@ -120,11 +120,13 @@ Located in `frontend/`. It's a **Next.js** application.
 
 ## 5. Smart Contract & The Trust Anchor
 
-To make your app verifiable, deploy `contracts/src/NovaAppBase.sol`. 
+To make your app verifiable, deploy an **app contract** that extends `NovaAppBase`.
+
+This template includes `ETHPriceOracleApp` (recommended) which adds an on-chain ETH/USD price + request/update events on top of `NovaAppBase`.
 
 ### Automated Registration
 Nova platform bridges the gap between your TEE and your Contract:
-1. **Deploy Contract**: Deploy `NovaAppBase` to your target chain.
+1. **Deploy Contract**: Deploy `ETHPriceOracleApp` (or any `NovaAppBase`-derived contract) to your target chain.
 2. **Nova Setup**: In the Nova Console, enter your **Contract Address** during app creation.
 3. **Registration**: When the TEE starts, Nova Platform automatically registers its hardware wallet address in your contract by calling `registerTEEWallet` via the Nova Registry.
 
@@ -150,7 +152,7 @@ make build-frontend
 make docker-run
 ```
 
-Visit `http://localhost:8000`. Test the S3 storage and Oracle demo.
+Visit `http://localhost:8000/frontend`. Test the S3 storage and Oracle demo.
 
 ---
 
@@ -161,8 +163,11 @@ Go to the [Nova Platform Console](https://nova.sparsity.cloud), click **Create A
 1. Select your repository/branch.
 2. Enter **8000** as the **App Listening Port**.
 3. **Register App in Nova Registry**: This happens automatically when you create the app; Nova assigns a unique App ID and initializes the registry entry.
-4. **Enter your Contract Address**: This is the address of your deployed `NovaAppBase` contract.
+4. **Enter your Contract Address**: This is the address of your deployed app contract (e.g. `ETHPriceOracleApp`).
 5. Configure your S3 credentials if using persistent storage.
+
+> [!IMPORTANT]
+> This repo's enclave code reads the contract address from [enclave/config.py](enclave/config.py) (`CONTRACT_ADDRESS`). Ensure the value committed/configured there matches what you enter in the Nova Console.
 
 > [!NOTE]
 > **Automatic Management**: In production, Nova automatically handles **S3 buckets** and **Egress policies**. The platform injects these configurations directly into your enclave at runtime.

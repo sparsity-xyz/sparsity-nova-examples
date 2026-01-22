@@ -23,6 +23,7 @@ This template targets the Nova platform for verifiable TEE applications and is a
 |   |-- requirements.txt
 |-- contracts/             # Solidity contracts
 |   |-- src/NovaAppBase.sol
+|   |-- src/ETHPriceOracleApp.sol
 |-- frontend/              # Next.js frontend
 |-- enclaver.yaml          # Enclave config
 |-- Makefile
@@ -135,15 +136,17 @@ For this template, the app contract address is configured in [enclave/config.py]
 
 ## Environment Variables
 
+Note: Per template configuration, on-chain settings are read from [enclave/config.py](enclave/config.py) (static constants), not from environment variables.
+
 | Variable | Default | Description |
 |------|--------|------|
 | `IN_ENCLAVE` | false | Run inside a real enclave |
-| `RPC_URL` | https://sepolia.base.org | JSON-RPC endpoint |
-| `CHAIN_ID` | 84532 | Chain ID (Base Sepolia) |
-| `CONTRACT_ADDRESS` | (empty) | Legacy (not used if you configure `enclave/config.py`) |
-| `APP_CONTRACT_ADDRESS` | (empty) | Legacy alias (not used if you configure `enclave/config.py`) |
-| `BROADCAST_TX` | false | Auto-broadcast signed transactions |
-| `ANCHOR_ON_WRITE` | true | Anchor state hash on writes |
+| `RPC_URL` | https://sepolia.base.org | Legacy (not read by enclave; use `enclave/config.py`) |
+| `CHAIN_ID` | 84532 | Legacy (not read by enclave; use `enclave/config.py`) |
+| `CONTRACT_ADDRESS` | (empty) | Legacy (not read by enclave; use `enclave/config.py`) |
+| `APP_CONTRACT_ADDRESS` | (empty) | Legacy alias (not read by enclave; use `enclave/config.py`) |
+| `BROADCAST_TX` | false | Legacy (not read by enclave; use `enclave/config.py`) |
+| `ANCHOR_ON_WRITE` | true | Legacy (not read by enclave; use `enclave/config.py`) |
 | `CORS_ORIGINS` | * | Allowed CORS origins (comma-separated or *) |
 | `CORS_ALLOW_CREDENTIALS` | true | Allow cross-origin credentials |
 
@@ -179,6 +182,8 @@ For this template, the app contract address is configured in [enclave/config.py]
 If you need custom logic:
 - Inherit from `NovaAppBase`
 - Add your own events and functions
+
+This template also includes `ETHPriceOracleApp`, which adds an on-chain ETH/USD price and request/update events consumed by the enclave oracle endpoints.
 
 ### Nova App Contract Deployment Flow
 1. Deploy the app contract (must extend [contracts/src/ISparsityApp.sol](contracts/src/ISparsityApp.sol))

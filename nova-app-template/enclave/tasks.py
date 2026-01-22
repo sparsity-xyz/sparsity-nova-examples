@@ -24,7 +24,6 @@ Example use cases:
 
 import json
 import logging
-import os
 from datetime import datetime
 from datetime import timezone
 from typing import Optional, TYPE_CHECKING, Dict, Any
@@ -55,9 +54,9 @@ app_state: Optional[dict] = None
 odyn: Optional["Odyn"] = None
 
 # =============================================================================
-# Configuration (set via environment variables)
+# Configuration
 # =============================================================================
-# See config.py for all configuration sources and defaults.
+# See config.py for all configuration and defaults.
 
 
 def init(state_ref: dict, odyn_ref: "Odyn"):
