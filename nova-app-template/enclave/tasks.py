@@ -24,12 +24,22 @@ Example use cases:
 
 import json
 import logging
-import os
 from datetime import datetime
-from typing import Optional, TYPE_CHECKING
+from datetime import timezone
+from typing import Optional, TYPE_CHECKING, Dict, Any
 
 import requests
 from eth_hash.auto import keccak
+
+from chain import compute_state_hash, sign_update_state_hash, sign_update_eth_price, rpc_call_with_failover
+from config import (
+    RPC_URL,
+    CONTRACT_ADDRESS,
+    CHAIN_ID,
+    BROADCAST_TX,
+    ORACLE_PRICE_UPDATE_MINUTES,
+    ORACLE_EVENT_POLL_LOOKBACK_BLOCKS,
+)
 
 # Type hint for Odyn (actual import would cause circular dependency)
 if TYPE_CHECKING:
@@ -44,11 +54,9 @@ app_state: Optional[dict] = None
 odyn: Optional["Odyn"] = None
 
 # =============================================================================
-# Configuration (set via environment variables)
+# Configuration
 # =============================================================================
-RPC_URL = os.getenv("RPC_URL", "https://sepolia.base.org")
-CONTRACT_ADDRESS = os.getenv("CONTRACT_ADDRESS", "")
-CHAIN_ID = int(os.getenv("CHAIN_ID", "84532"))  # Base Sepolia
+# See config.py for all configuration and defaults.
 
 
 def init(state_ref: dict, odyn_ref: "Odyn"):
@@ -70,11 +78,6 @@ def init(state_ref: dict, odyn_ref: "Odyn"):
 # =============================================================================
 # Helper Functions
 # =============================================================================
-
-def compute_state_hash(data: dict) -> str:
-    """Compute keccak256 hash of state data for on-chain compatibility."""
-    json_bytes = json.dumps(data, sort_keys=True).encode('utf-8')
-    return "0x" + keccak(json_bytes).hex()
 
 
 def fetch_external_data() -> Optional[dict]:
@@ -102,6 +105,51 @@ def fetch_external_data() -> Optional[dict]:
         return None
 
 
+def fetch_eth_price_usd() -> int:
+    """Fetch ETH/USD spot price as integer USD (no decimals)."""
+    response = requests.get(
+        "https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd",
+        timeout=10,
+    )
+    response.raise_for_status()
+    return int(response.json()["ethereum"]["usd"])
+
+
+def update_eth_price_on_chain(*, request_id: int, reason: str) -> Dict[str, Any]:
+    if not (odyn and CONTRACT_ADDRESS):
+        raise RuntimeError("Oracle not configured (missing odyn or CONTRACT_ADDRESS)")
+
+    price_usd = fetch_eth_price_usd()
+    updated_at = int(datetime.now(tz=timezone.utc).timestamp())
+
+    signed = sign_update_eth_price(
+        odyn=odyn,
+        contract_address=CONTRACT_ADDRESS,
+        chain_id=CHAIN_ID,
+        rpc_url=RPC_URL,
+        request_id=request_id,
+        price_usd=price_usd,
+        updated_at=updated_at,
+        broadcast=BROADCAST_TX,
+    )
+
+    oracle_state = app_state.setdefault("data", {}).setdefault("oracle", {}) if app_state else {}
+    oracle_state["last_price_usd"] = price_usd
+    oracle_state["last_updated_at"] = updated_at
+    oracle_state["last_reason"] = reason
+    oracle_state["last_tx"] = signed
+    oracle_state["last_run"] = datetime.utcnow().isoformat() + "Z"
+
+    return {
+        "price_usd": price_usd,
+        "updated_at": updated_at,
+        "request_id": request_id,
+        "tx": signed,
+        "broadcast": BROADCAST_TX,
+        "contract_address": CONTRACT_ADDRESS,
+    }
+
+
 def update_state_hash_on_chain(state_hash: str) -> Optional[str]:
     """
     Sign a transaction to update state hash on-chain.
@@ -116,25 +164,16 @@ def update_state_hash_on_chain(state_hash: str) -> Optional[str]:
         return None
     
     try:
-        # Function selector for updateStateHash(bytes32)
-        function_selector = "0x9f0e2260"
-        call_data = f"{function_selector}{state_hash[2:].zfill(64)}"
-        
-        tx = {
-            "kind": "structured",
-            "chain_id": hex(CHAIN_ID),
-            "nonce": "0x0",  # Should be fetched from RPC in production
-            "max_priority_fee_per_gas": "0x5F5E100",
-            "max_fee_per_gas": "0xB2D05E00",
-            "gas_limit": "0x30D40",
-            "to": CONTRACT_ADDRESS,
-            "value": "0x0",
-            "data": call_data
-        }
-        
-        signed = odyn.sign_tx(tx)
+        signed = sign_update_state_hash(
+            odyn=odyn,
+            contract_address=CONTRACT_ADDRESS,
+            chain_id=CHAIN_ID,
+            rpc_url=RPC_URL,
+            state_hash=state_hash,
+            broadcast=BROADCAST_TX,
+        )
         logger.info(f"Signed state hash update tx: {signed['transaction_hash']}")
-        return signed["raw_transaction"]
+        return signed.get("raw_transaction")
     except Exception as e:
         logger.error(f"Failed to sign state hash tx: {e}")
         return None
@@ -190,13 +229,15 @@ def background_task():
                 logger.info(f"State hash: {state_hash}")
                 
                 # Optionally sign tx for on-chain update (don't broadcast here)
-                # raw_tx = update_state_hash_on_chain(state_hash)
-                # if raw_tx:
-                #     app_state["data"]["pending_tx"] = raw_tx
+                raw_tx = update_state_hash_on_chain(state_hash)
+                if raw_tx:
+                    app_state["data"]["pending_tx"] = raw_tx
             else:
                 logger.warning("State save returned False")
     except Exception as e:
         logger.error(f"Cron auto-save failed: {e}")
+
+    # On-chain event polling is scheduled separately (see app.py)
 
 
 
@@ -205,37 +246,172 @@ def background_task():
 # =============================================================================
 
 def poll_contract_events():
+    """Poll for on-chain events and respond.
+
+    - Listens for StateUpdateRequested(bytes32,address) and anchors local state hash.
+    - Listens for EthPriceUpdateRequested(uint256,address) and updates ETH price on-chain.
+
+    Logs are stored in app_state["data"]["event_monitor"] for frontend display.
     """
-    Example: Poll for on-chain events and respond.
-    
-    In a real implementation, you would:
-    1. Track the last processed block
-    2. Query for new events since that block
-    3. Process events and update state
-    4. Sign response transactions
-    
-    This requires web3.py for full implementation.
-    """
-    # Example pattern (requires web3.py):
-    #
-    # from web3 import Web3
-    # w3 = Web3(Web3.HTTPProvider(RPC_URL))
-    # 
-    # contract = w3.eth.contract(address=CONTRACT_ADDRESS, abi=ABI)
-    # 
-    # last_block = app_state["data"].get("last_processed_block", 0)
-    # current_block = w3.eth.block_number
-    # 
-    # events = contract.events.RequestCreated.get_logs(
-    #     fromBlock=last_block + 1,
-    #     toBlock=current_block
-    # )
-    # 
-    # for event in events:
-    #     request_id = event.args.requestId
-    #     # Process event and sign response
-    #     ...
-    # 
-    # app_state["data"]["last_processed_block"] = current_block
-    pass
+    if not (odyn and app_state and CONTRACT_ADDRESS):
+        return
+
+    # Initialize monitor state early
+    monitor = app_state.setdefault("data", {}).setdefault("event_monitor", {})
+
+    def add_log(msg: str):
+        """Add a log entry to event monitor logs."""
+        logs = monitor.setdefault("logs", [])
+        timestamp = datetime.utcnow().isoformat() + "Z"
+        logs.append({"time": timestamp, "message": msg})
+        # Keep only last 100 logs
+        if len(logs) > 100:
+            monitor["logs"] = logs[-100:]
+        monitor["last_poll"] = timestamp
+
+    # Use rpc_call_with_failover from chain.py for automatic failover
+    rpc_call = rpc_call_with_failover
+
+    try:
+        current_block_hex = rpc_call("eth_blockNumber", [])
+        current_block = int(current_block_hex, 16)
+    except Exception as e:
+        add_log(f"✗ Failed to get current block: {e}")
+        return
+
+    last_block = app_state["data"].get("last_processed_block")
+    if last_block is None:
+        last_block = max(current_block - 1, 0)
+
+    # Update monitor state
+    monitor = app_state.setdefault("data", {}).setdefault("event_monitor", {})
+    monitor["current_block"] = current_block
+    monitor["last_processed_block"] = last_block
+    monitor["contract_address"] = CONTRACT_ADDRESS
+
+    # Event signature: StateUpdateRequested(bytes32,address)
+    topic0 = "0x" + keccak(b"StateUpdateRequested(bytes32,address)").hex()
+
+    logs = rpc_call(
+        "eth_getLogs",
+        [{
+            "fromBlock": hex(last_block + 1),
+            "toBlock": hex(current_block),
+            "address": CONTRACT_ADDRESS,
+            "topics": [topic0],
+        }],
+    )
+
+    if logs:
+        app_state["data"]["last_event_count"] = app_state["data"].get("last_event_count", 0) + len(logs)
+        add_log(f"Found {len(logs)} StateUpdateRequested event(s)")
+
+        state_hash = compute_state_hash(app_state.get("data", {}))
+        app_state["data"]["last_state_hash"] = state_hash
+
+        signed = sign_update_state_hash(
+            odyn=odyn,
+            contract_address=CONTRACT_ADDRESS,
+            chain_id=CHAIN_ID,
+            rpc_url=RPC_URL,
+            state_hash=state_hash,
+            broadcast=BROADCAST_TX,
+        )
+        app_state["data"]["last_event_anchor_tx"] = signed
+        add_log(f"✓ State hash updated on-chain: {state_hash[:18]}...")
+
+    # ---------------------------------------------------------------------
+    # Oracle: EthPriceUpdateRequested(uint256,address)
+    # ---------------------------------------------------------------------
+    oracle_topic0 = "0x" + keccak(b"EthPriceUpdateRequested(uint256,address)").hex()
+
+    try:
+        oracle_logs = rpc_call(
+            "eth_getLogs",
+            [{
+                "fromBlock": hex(max(current_block - ORACLE_EVENT_POLL_LOOKBACK_BLOCKS, 0)),
+                "toBlock": hex(current_block),
+                "address": CONTRACT_ADDRESS,
+                "topics": [oracle_topic0],
+            }],
+        )
+    except Exception as e:
+        add_log(f"✗ Failed to fetch oracle events: {e}")
+        oracle_logs = []
+
+    oracle_state = app_state.setdefault("data", {}).setdefault("oracle", {})
+    handled = oracle_state.setdefault("handled_requests", {})
+
+    # Count pending requests
+    pending_count = 0
+    for log in oracle_logs or []:
+        request_id_hex = log.get("topics", [None, None])[1]
+        if request_id_hex:
+            request_id = int(request_id_hex, 16)
+            if str(request_id) not in handled:
+                pending_count += 1
+
+    if pending_count > 0:
+        add_log(f"Found {pending_count} pending EthPriceUpdateRequested event(s)")
+
+    # Store recent events for frontend display
+    recent_events = []
+    for log in oracle_logs or []:
+        request_id_hex = log.get("topics", [None, None])[1]
+        if request_id_hex:
+            request_id = int(request_id_hex, 16)
+            block_num = int(log.get("blockNumber", "0x0"), 16)
+            tx_hash = log.get("transactionHash", "")
+            is_handled = str(request_id) in handled
+            recent_events.append({
+                "type": "EthPriceUpdateRequested",
+                "request_id": request_id,
+                "block_number": block_num,
+                "tx_hash": tx_hash,
+                "handled": is_handled,
+            })
+    monitor["recent_events"] = recent_events
+    monitor["pending_count"] = pending_count
+
+    for log in oracle_logs or []:
+        try:
+            request_id_hex = log.get("topics", [None, None])[1]
+            if not request_id_hex:
+                continue
+            request_id = int(request_id_hex, 16)
+            request_id_key = str(request_id)
+            if request_id_key in handled:
+                continue
+
+            add_log(f"Processing request #{request_id}...")
+            result = update_eth_price_on_chain(request_id=request_id, reason="onchain_event")
+            handled[request_id_key] = {
+                "handled_at": datetime.utcnow().isoformat() + "Z",
+                "tx": result.get("tx"),
+                "price_usd": result.get("price_usd"),
+                "updated_at": result.get("updated_at"),
+            }
+            add_log(f"✓ Request #{request_id}: Updated price ${result.get('price_usd')}")
+            # Update recent_events to mark as handled
+            for ev in monitor.get("recent_events", []):
+                if ev.get("request_id") == request_id:
+                    ev["handled"] = True
+                    ev["price_usd"] = result.get("price_usd")
+        except Exception as e:
+            add_log(f"✗ Request #{request_id}: Failed - {e}")
+            logger.warning(f"Failed handling oracle request log: {e}")
+
+    app_state["data"]["last_processed_block"] = current_block
+
+
+def oracle_periodic_update():
+    """Periodic ETH price update (default every 15 minutes)."""
+    if app_state is None:
+        return
+    try:
+        update_eth_price_on_chain(request_id=0, reason="periodic")
+    except Exception as e:
+        oracle_state = app_state.setdefault("data", {}).setdefault("oracle", {})
+        oracle_state["last_error"] = str(e)
+        logger.warning(f"Periodic oracle update failed: {e}")
 

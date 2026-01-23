@@ -2,7 +2,7 @@
 pragma solidity ^0.8.20;
 
 import {Script, console} from "forge-std/Script.sol";
-import {NovaAppBase} from "../src/NovaAppBase.sol";
+import {ETHPriceOracleApp} from "../src/ETHPriceOracleApp.sol";
 
 contract DeployScript is Script {
     function run() public {
@@ -10,8 +10,8 @@ contract DeployScript is Script {
 
         vm.startBroadcast(deployerPrivateKey);
 
-        NovaAppBase app = new NovaAppBase();
-        console.log("NovaAppBase deployed at:", address(app));
+        ETHPriceOracleApp app = new ETHPriceOracleApp();
+        console.log("ETHPriceOracleApp deployed at:", address(app));
 
         vm.stopBroadcast();
     }
