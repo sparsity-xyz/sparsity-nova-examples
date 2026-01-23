@@ -1,7 +1,7 @@
 ## Nova App Contract Deployment Flow
 
 To work with the Nova Registry, your app contract must implement
-`ISparsityApp` and expose `registerTEEWallet(address)`.
+`ISparsityApp` and expose `setNovaRegistry(address)` and `registerTEEWallet(address)`.
 
 Recommended flow (Foundry-based):
 

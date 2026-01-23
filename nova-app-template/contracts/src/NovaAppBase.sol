@@ -5,19 +5,12 @@ import "./ISparsityApp.sol";
 
 /**
  * @title NovaAppBase
- * @dev Base contract for Nova TEE applications with on-chain state verification.
+ * @dev Base contract for Nova TEE applications with registry and TEE wallet wiring.
  *
- * This contract stores the hash of the encrypted application state,
- * allowing external verification that the TEE's state matches on-chain expectations.
  * It implements ISparsityApp so the Nova Registry can register the TEE wallet.
+ * App-specific logic (e.g., state hashing) lives in derived contracts.
  */
 contract NovaAppBase is ISparsityApp {
-    /// @notice The keccak256 hash of the current encrypted state blob
-    bytes32 public stateHash;
-
-    /// @notice Block number when state was last updated
-    uint256 public lastUpdatedBlock;
-
     /// @notice The TEE wallet address (from Odyn /v1/eth/address)
     address public teeWalletAddress;
 
@@ -27,30 +20,21 @@ contract NovaAppBase is ISparsityApp {
     /// @notice Contract owner for administrative functions
     address public owner;
 
-    /// @notice Emitted when state hash is updated
-    event StateUpdated(bytes32 indexed newHash, uint256 blockNumber);
-
-    /// @notice Emitted when an external party requests a state update
-    event StateUpdateRequested(bytes32 indexed requestedHash, address indexed requester);
-
     /// @notice Emitted when TEE wallet is registered
-    event TeeWalletRegistered(address indexed wallet);
+    event TEEWalletRegistered(address indexed wallet);
 
     /// @notice Emitted when Nova Registry is set
     event NovaRegistrySet(address indexed registry);
 
     /// @notice Emitted when ownership is transferred
-    event OwnershipTransferred(
-        address indexed previousOwner,
-        address indexed newOwner
-    );
+    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
 
     modifier onlyOwner() {
         require(msg.sender == owner, "NovaAppBase: caller is not the owner");
         _;
     }
 
-    modifier onlyTee() {
+    modifier onlyTEE() {
         require(
             msg.sender == teeWalletAddress,
             "NovaAppBase: caller is not the TEE"
@@ -70,10 +54,11 @@ contract NovaAppBase is ISparsityApp {
     /**
      * @notice Set the Nova Registry contract address
      * @param _registry The Nova Registry contract address
-     * @dev Only owner can set/update registry address
+     * @dev Can only be set once
      */
-    function setNovaRegistry(address _registry) external onlyOwner {
+    function setNovaRegistry(address _registry) external override onlyOwner {
         require(_registry != address(0), "NovaAppBase: invalid registry");
+        require(novaRegistry == address(0), "NovaAppBase: registry already set");
         novaRegistry = _registry;
         emit NovaRegistrySet(_registry);
     }
@@ -91,38 +76,7 @@ contract NovaAppBase is ISparsityApp {
         require(teeWalletAddress_ != address(0), "NovaAppBase: invalid TEE wallet");
 
         teeWalletAddress = teeWalletAddress_;
-        emit TeeWalletRegistered(teeWalletAddress_);
-    }
-
-    /**
-     * @notice Update the state hash (called by TEE after state save)
-     * @param _newHash The keccak256 hash returned by Odyn's /v1/state/save
-     */
-    function updateStateHash(bytes32 _newHash) external onlyTee {
-        require(_newHash != bytes32(0), "NovaAppBase: invalid hash");
-
-        stateHash = _newHash;
-        lastUpdatedBlock = block.number;
-
-        emit StateUpdated(_newHash, block.number);
-    }
-
-    /**
-     * @notice Emit a request to update state hash (off-chain trigger)
-     * @param requestedHash Optional expected hash (can be zero)
-     * @dev The enclave listens for this event and responds by updating state
-     */
-    function requestStateUpdate(bytes32 requestedHash) external {
-        emit StateUpdateRequested(requestedHash, msg.sender);
-    }
-
-    /**
-     * @notice Verify that a given hash matches the current state
-     * @param _hash Hash to verify
-     * @return True if hash matches current state
-     */
-    function verifyStateHash(bytes32 _hash) external view returns (bool) {
-        return stateHash == _hash;
+        emit TEEWalletRegistered(teeWalletAddress_);
     }
 
     /**
@@ -130,10 +84,7 @@ contract NovaAppBase is ISparsityApp {
      * @param newOwner The new owner address
      */
     function transferOwnership(address newOwner) external onlyOwner {
-        require(
-            newOwner != address(0),
-            "NovaAppBase: new owner is zero address"
-        );
+        require(newOwner != address(0), "NovaAppBase: new owner is zero address");
         emit OwnershipTransferred(owner, newOwner);
         owner = newOwner;
     }

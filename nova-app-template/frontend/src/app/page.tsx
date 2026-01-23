@@ -22,7 +22,7 @@ export default function Home() {
     const [client] = useState(() => new EnclaveClient());
     const [status, setStatus] = useState<ConnectionStatus>({
         connected: false,
-        enclaveUrl: '',
+        enclaveUrl: 'http://127.0.0.1:8000',
     });
     const [loading, setLoading] = useState(false);
     const [activeTab, setActiveTab] = useState('identity');
@@ -44,6 +44,11 @@ export default function Home() {
     const [storageVal, setStorageVal] = useState('{"theme": "dark"}');
 
     const [echoTrace, setEchoTrace] = useState<EncryptedCallTrace | null>(null);
+
+    // Event monitor state
+    const [eventMonitorData, setEventMonitorData] = useState<any>(null);
+    const [eventMonitorLoading, setEventMonitorLoading] = useState(false);
+    const [eventMonitorError, setEventMonitorError] = useState<string | null>(null);
 
     // Auto-detect enclave URL from current location
     useEffect(() => {
@@ -89,6 +94,35 @@ export default function Home() {
         setActiveTab(tabId);
     };
 
+    // Auto-load event monitor status when switching to events tab (poll every 5s)
+    useEffect(() => {
+        if (activeTab !== 'events' || !status.connected) return;
+
+        const fetchMonitorStatus = async () => {
+            setEventMonitorLoading(true);
+            setEventMonitorError(null);
+
+            try {
+                const res = await client.call('/api/events/monitor', 'GET');
+                setEventMonitorData(res);
+            } catch (err: any) {
+                const errDetail = err?.detail;
+                const errMsg = errDetail?.message || errDetail?.error || err?.message || 'Unknown error';
+                setEventMonitorError(errMsg);
+            } finally {
+                setEventMonitorLoading(false);
+            }
+        };
+
+        // Initial fetch
+        fetchMonitorStatus();
+
+        // Poll every 5 seconds
+        const interval = setInterval(fetchMonitorStatus, 5000);
+
+        return () => clearInterval(interval);
+    }, [activeTab, status.connected, client]);
+
     const callApi = async (path: string, method: 'GET' | 'POST' = 'GET', body?: any, encrypted = false) => {
         const tabAtCall = activeTab;
         setLoading(true);
@@ -104,10 +138,17 @@ export default function Home() {
                 ...prev,
                 [tabAtCall]: { success: true, data: res, type: path },
             }));
-        } catch (error) {
+        } catch (error: any) {
+            const errorDetail = error?.detail ?? null;
+            const errorMessage = error instanceof Error ? error.message : 'Request failed';
             setResponsesByTab(prev => ({
                 ...prev,
-                [tabAtCall]: { success: false, error: error instanceof Error ? error.message : 'Request failed', type: path },
+                [tabAtCall]: {
+                    success: false,
+                    error: errorMessage,
+                    data: errorDetail,
+                    type: path,
+                },
             }));
         } finally {
             setLoading(false);
@@ -493,8 +534,8 @@ export default function Home() {
                             <div className="space-y-6">
                                 <h2 className="text-xl font-semibold mb-4">S3 Persistent Storage</h2>
                                 <p className="text-slate-600 text-sm leading-relaxed mb-6">
-                                    Store and retrieve sensitive state in encrypted S3 objects. Access is restricted to
-                                    this specific TEE instance.
+                                    Store and retrieve sensitive state in encrypted S3 objects. For <code className="bg-slate-100 px-1 rounded">user_settings</code> key,
+                                    the value hash is anchored on-chain and verified on retrieval.
                                 </p>
 
                                 <div className="grid grid-cols-2 gap-4">
@@ -537,6 +578,100 @@ export default function Home() {
                                 >
                                     List all stored keys...
                                 </button>
+
+                                {/* On-chain verification details for storage operations */}
+                                {activeResponse?.type?.includes('/api/storage') && activeResponse.success && activeResponse.data && (
+                                    <div className="bg-gradient-to-br from-slate-50 to-white border border-slate-200 rounded-2xl p-5 mt-4">
+                                        <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3">On-Chain Anchoring Status</h3>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                                            {/* TEE Address */}
+                                            {activeResponse.data.tee_address && (
+                                                <div className="bg-white border border-slate-200 rounded-xl p-3">
+                                                    <p className="text-slate-500 mb-1">TEE Wallet Address</p>
+                                                    <code className="text-slate-800 break-all">{activeResponse.data.tee_address}</code>
+                                                </div>
+                                            )}
+                                            {/* TEE Balance */}
+                                            {activeResponse.data.tee_balance_eth !== undefined && (
+                                                <div className="bg-white border border-slate-200 rounded-xl p-3">
+                                                    <p className="text-slate-500 mb-1">TEE Wallet Balance</p>
+                                                    <code className="text-slate-800">{activeResponse.data.tee_balance_eth.toFixed(6)} ETH</code>
+                                                </div>
+                                            )}
+                                            {/* Contract Address */}
+                                            {activeResponse.data.contract_address && (
+                                                <div className="bg-white border border-slate-200 rounded-xl p-3">
+                                                    <p className="text-slate-500 mb-1">Contract Address</p>
+                                                    <code className="text-slate-800 break-all">{activeResponse.data.contract_address}</code>
+                                                </div>
+                                            )}
+                                            {/* State Hash */}
+                                            {activeResponse.data.state_hash && (
+                                                <div className="bg-white border border-slate-200 rounded-xl p-3">
+                                                    <p className="text-slate-500 mb-1">State Hash (computed)</p>
+                                                    <code className="text-slate-800 break-all">{activeResponse.data.state_hash}</code>
+                                                </div>
+                                            )}
+                                            {/* Anchor Tx */}
+                                            {activeResponse.data.anchor_tx && (
+                                                <div className="bg-white border border-slate-200 rounded-xl p-3 col-span-2">
+                                                    <p className="text-slate-500 mb-1">Anchor Transaction</p>
+                                                    <code className="text-blue-700 break-all">{activeResponse.data.anchor_tx.transaction_hash || '—'}</code>
+                                                    {activeResponse.data.broadcast !== undefined && (
+                                                        <span className={`ml-2 ${activeResponse.data.anchor_tx.broadcasted ? 'text-emerald-600' : 'text-slate-500'}`}>
+                                                            {activeResponse.data.anchor_tx.broadcasted ? '(broadcasted)' : '(not broadcasted)'}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            )}
+                                            {/* Anchor Skipped */}
+                                            {activeResponse.data.anchor_skipped && (
+                                                <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-3 col-span-2">
+                                                    <p className="text-yellow-700 font-semibold">⚠ Anchoring Skipped</p>
+                                                    <p className="text-yellow-600 mt-1">{activeResponse.data.anchor_note}</p>
+                                                </div>
+                                            )}
+                                            {/* Anchor Error */}
+                                            {activeResponse.data.anchor_error && (
+                                                <div className="bg-red-50 border border-red-200 rounded-xl p-3 col-span-2">
+                                                    <p className="text-red-700 font-semibold">✗ Anchor Failed</p>
+                                                    <p className="text-red-600 mt-1">{activeResponse.data.anchor_error}</p>
+                                                    {activeResponse.data.error_type && (
+                                                        <p className="text-red-500 text-xs mt-1">Error Type: {activeResponse.data.error_type}</p>
+                                                    )}
+                                                    {activeResponse.data.hint && (
+                                                        <p className="text-red-500 text-xs mt-1">Hint: {activeResponse.data.hint}</p>
+                                                    )}
+                                                </div>
+                                            )}
+                                            {/* On-chain Hash (for retrieve) */}
+                                            {activeResponse.data.onchain_hash && (
+                                                <div className="bg-white border border-slate-200 rounded-xl p-3">
+                                                    <p className="text-slate-500 mb-1">On-Chain Hash</p>
+                                                    <code className="text-slate-800 break-all">{activeResponse.data.onchain_hash}</code>
+                                                </div>
+                                            )}
+                                            {/* Computed Hash (for retrieve) */}
+                                            {activeResponse.data.computed_hash && (
+                                                <div className="bg-white border border-slate-200 rounded-xl p-3">
+                                                    <p className="text-slate-500 mb-1">Computed Hash (from S3)</p>
+                                                    <code className="text-slate-800 break-all">{activeResponse.data.computed_hash}</code>
+                                                </div>
+                                            )}
+                                            {/* Verification Status */}
+                                            {activeResponse.data.verified !== undefined && (
+                                                <div className={`rounded-xl p-3 col-span-2 ${activeResponse.data.verified === true ? 'bg-emerald-50 border border-emerald-200' : activeResponse.data.verified === false ? 'bg-red-50 border border-red-200' : 'bg-yellow-50 border border-yellow-200'}`}>
+                                                    <p className={`font-semibold ${activeResponse.data.verified === true ? 'text-emerald-700' : activeResponse.data.verified === false ? 'text-red-700' : 'text-yellow-700'}`}>
+                                                        {activeResponse.data.verified === true ? '✓ Data Verified — S3 data matches on-chain hash' : activeResponse.data.verified === false ? '✗ Verification Failed — Hash mismatch, data untrusted' : '⚠ Verification Skipped'}
+                                                    </p>
+                                                    {activeResponse.data.verification_note && (
+                                                        <p className="text-xs text-slate-600 mt-1">{activeResponse.data.verification_note}</p>
+                                                    )}
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         )}
 
@@ -562,6 +697,33 @@ export default function Home() {
                                     </button>
                                 </div>
 
+                                {/* Background Runner Status */}
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                                        <label className="text-xs text-slate-500 block mb-1">Last Cron Run</label>
+                                        <span className="text-sm font-mono text-emerald-600 italic">
+                                            {status.connected && responsesByTab.identity?.data?.statusInfo?.cron_info?.last_run
+                                                ? new Date(responsesByTab.identity.data.statusInfo.cron_info.last_run).toLocaleTimeString()
+                                                : 'Awaiting sync...'}
+                                        </span>
+                                    </div>
+                                    <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                                        <label className="text-xs text-slate-500 block mb-1">Background Runner Status</label>
+                                        <div className="flex items-center gap-2">
+                                            <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
+                                            <span className="text-xs text-slate-600">
+                                                Worker active • {responsesByTab.identity?.data?.statusInfo?.cron_info?.counter || 0} tasks completed
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={() => callApi('/status', 'GET')}
+                                    disabled={loading || !status.connected}
+                                    className="w-full py-3 border border-slate-200 rounded-xl text-sm font-medium hover:bg-slate-50 transition"
+                                >
+                                    Refresh Background Job Stats
+                                </button>
                             </div>
                         )}
 
@@ -569,105 +731,142 @@ export default function Home() {
                             <div className="space-y-6">
                                 <h2 className="text-xl font-semibold mb-4">On-Chain Event Monitor</h2>
                                 <p className="text-slate-600 text-sm leading-relaxed mb-6">
-                                    Background workers in the enclave monitor blockchain events and respond automatically.
-                                    The state hash is updated periodically to ensure data integrity.
+                                    The enclave automatically monitors on-chain events. When an <code className="bg-slate-100 px-1 rounded">EthPriceUpdateRequested</code> event
+                                    is detected, it fetches ETH/USD and submits an on-chain update automatically.
                                 </p>
 
-                                <div className="space-y-4">
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
-                                            <label className="text-xs text-slate-500 block mb-1">Last Cron Run</label>
-                                            <span className="text-sm font-mono text-emerald-600 italic">
-                                                {status.connected && activeResponse?.data?.cron_info?.last_run
-                                                    ? new Date(activeResponse.data.cron_info.last_run).toLocaleTimeString()
-                                                    : 'Awaiting sync...'}
+                                {/* Status Bar */}
+                                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-3">
+                                            {eventMonitorLoading ? (
+                                                <div className="w-3 h-3 rounded-full bg-blue-500 animate-pulse"></div>
+                                            ) : eventMonitorError ? (
+                                                <div className="w-3 h-3 rounded-full bg-red-500"></div>
+                                            ) : eventMonitorData?.status === 'active' ? (
+                                                <div className="w-3 h-3 rounded-full bg-emerald-500 animate-pulse"></div>
+                                            ) : (
+                                                <div className="w-3 h-3 rounded-full bg-yellow-500"></div>
+                                            )}
+                                            <span className="text-sm font-medium text-slate-700">
+                                                {eventMonitorLoading ? 'Loading...' :
+                                                 eventMonitorError ? 'Error' :
+                                                 eventMonitorData?.status === 'active' ? 'Monitoring Active' :
+                                                 eventMonitorData?.status === 'not_configured' ? 'Contract Not Configured' :
+                                                 'Initializing...'}
                                             </span>
                                         </div>
-                                        <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
-                                            <label className="text-xs text-slate-500 block mb-1">State Hash (Keccak256)</label>
-                                            <span className="text-sm font-mono text-blue-600 italic truncate block">
-                                                {status.connected && activeResponse?.data?.last_state_hash
-                                                    ? `0x${activeResponse.data.last_state_hash.slice(0, 16)}...`
-                                                    : 'Awaiting sync...'}
-                                            </span>
+                                        <div className="text-xs text-slate-500">
+                                            {eventMonitorData?.last_poll && (
+                                                <span>Last poll: {new Date(eventMonitorData.last_poll).toLocaleTimeString()}</span>
+                                            )}
                                         </div>
                                     </div>
-                                    <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
-                                        <label className="text-xs text-slate-500 block mb-1">Background Runner Status</label>
-                                        <div className="flex items-center gap-2">
-                                            <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
-                                            <span className="text-xs text-slate-600">
-                                                Worker active • {activeResponse?.data?.cron_info?.counter || 0} tasks completed
-                                            </span>
+                                    {eventMonitorData?.contract_address && (
+                                        <div className="mt-2 text-xs text-slate-500">
+                                            Contract: <code className="bg-slate-100 px-1 rounded">{eventMonitorData.contract_address}</code>
                                         </div>
-                                    </div>
-                                    <button
-                                        onClick={() => callApi('/status', 'GET')}
-                                        disabled={loading || !status.connected}
-                                        className="w-full py-3 border border-slate-200 rounded-xl text-sm font-medium hover:bg-slate-50 transition"
-                                    >
-                                        Refresh Background Job Stats
-                                    </button>
-
-                                    <button
-                                        onClick={() => callApi('/api/events/oracle?lookback=1000', 'GET')}
-                                        disabled={loading || !status.connected}
-                                        className="w-full py-3 border border-slate-200 rounded-xl text-sm font-medium hover:bg-slate-50 transition"
-                                    >
-                                        Load Oracle Events (Last 1000 Blocks)
-                                    </button>
-
-                                    {activeResponse?.type === '/api/events/oracle?lookback=1000' && activeResponse.success && (
-                                        <div className="bg-white border border-slate-200 rounded-2xl p-4">
-                                            <div className="flex items-center justify-between mb-3">
-                                                <div className="text-xs font-bold text-slate-500 uppercase tracking-widest">
-                                                    Oracle Events
-                                                </div>
-                                                <div className="text-xs text-slate-500 font-mono">
-                                                    blocks {activeResponse.data?.from_block} → {activeResponse.data?.to_block}
-                                                </div>
-                                            </div>
-
-                                            <div className="overflow-auto max-h-[320px]">
-                                                <table className="w-full text-xs">
-                                                    <thead className="text-slate-500">
-                                                        <tr className="border-b border-slate-200">
-                                                            <th className="text-left py-2 pr-3">Block</th>
-                                                            <th className="text-left py-2 pr-3">Type</th>
-                                                            <th className="text-left py-2 pr-3">Request ID</th>
-                                                            <th className="text-left py-2 pr-3">Price</th>
-                                                            <th className="text-left py-2 pr-3">Handled</th>
-                                                            <th className="text-left py-2 pr-3">Tx</th>
-                                                        </tr>
-                                                    </thead>
-                                                    <tbody className="text-slate-700">
-                                                        {(activeResponse.data?.events || []).map((e: any, idx: number) => (
-                                                            <tr key={idx} className="border-b border-slate-100">
-                                                                <td className="py-2 pr-3 font-mono">{e.block_number}</td>
-                                                                <td className="py-2 pr-3">{e.type}</td>
-                                                                <td className="py-2 pr-3 font-mono">{e.request_id}</td>
-                                                                <td className="py-2 pr-3 font-mono">
-                                                                    {e.type === 'EthPriceUpdated' ? `$${e.price_usd}` : '-'}
-                                                                </td>
-                                                                <td className="py-2 pr-3">
-                                                                    {e.type === 'EthPriceUpdateRequested'
-                                                                        ? (e.handled ? 'yes' : 'no')
-                                                                        : '-'}
-                                                                </td>
-                                                                <td className="py-2 pr-3 font-mono">
-                                                                    {e.tx_hash ? `${e.tx_hash.slice(0, 10)}…` : ''}
-                                                                </td>
-                                                            </tr>
-                                                        ))}
-                                                    </tbody>
-                                                </table>
-                                            </div>
-                                            <p className="mt-3 text-xs text-slate-500">
-                                                If an on-chain update request is detected, the enclave will fetch ETH/USD and submit an on-chain update.
-                                            </p>
+                                    )}
+                                    {eventMonitorData?.current_block && (
+                                        <div className="mt-1 text-xs text-slate-500">
+                                            Block: <span className="font-mono">{eventMonitorData.current_block}</span>
                                         </div>
                                     )}
                                 </div>
+
+                                {/* Error Display */}
+                                {eventMonitorError && (
+                                    <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+                                        <p className="text-red-700 font-semibold">✗ {eventMonitorError}</p>
+                                    </div>
+                                )}
+
+                                {/* Recent Events */}
+                                {eventMonitorData?.recent_events?.length > 0 && (
+                                    <div className="bg-white border border-slate-200 rounded-2xl p-4">
+                                        <div className="flex items-center justify-between mb-3">
+                                            <div className="text-xs font-bold text-slate-500 uppercase tracking-widest">
+                                                Recent Events
+                                            </div>
+                                            {eventMonitorData.pending_count > 0 && (
+                                                <span className="bg-amber-100 text-amber-700 text-xs px-2 py-1 rounded-full">
+                                                    {eventMonitorData.pending_count} pending
+                                                </span>
+                                            )}
+                                        </div>
+                                        <div className="overflow-auto max-h-[200px]">
+                                            <table className="w-full text-xs">
+                                                <thead className="text-slate-500">
+                                                    <tr className="border-b border-slate-200">
+                                                        <th className="text-left py-2 pr-3">Block</th>
+                                                        <th className="text-left py-2 pr-3">Request ID</th>
+                                                        <th className="text-left py-2 pr-3">Status</th>
+                                                        <th className="text-left py-2 pr-3">Price</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="text-slate-700">
+                                                    {eventMonitorData.recent_events.map((e: any, idx: number) => (
+                                                        <tr key={idx} className={`border-b border-slate-100 ${!e.handled ? 'bg-amber-50' : ''}`}>
+                                                            <td className="py-2 pr-3 font-mono">{e.block_number}</td>
+                                                            <td className="py-2 pr-3 font-mono">#{e.request_id}</td>
+                                                            <td className="py-2 pr-3">
+                                                                {e.handled ? (
+                                                                    <span className="text-emerald-600">✓ handled</span>
+                                                                ) : (
+                                                                    <span className="text-amber-600">⏳ pending</span>
+                                                                )}
+                                                            </td>
+                                                            <td className="py-2 pr-3 font-mono">
+                                                                {e.price_usd ? `$${e.price_usd}` : '-'}
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Activity Logs */}
+                                {eventMonitorData?.logs?.length > 0 && (
+                                    <div className="bg-slate-900 rounded-2xl p-4">
+                                        <div className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">
+                                            Activity Log
+                                        </div>
+                                        <div className="font-mono text-xs text-slate-300 space-y-1 max-h-[200px] overflow-auto">
+                                            {eventMonitorData.logs.slice().reverse().map((log: any, idx: number) => (
+                                                <div key={idx} className="flex gap-2">
+                                                    <span className="text-slate-500 shrink-0">
+                                                        {new Date(log.time).toLocaleTimeString()}
+                                                    </span>
+                                                    <span className={
+                                                        log.message.includes('✓') ? 'text-emerald-400' :
+                                                        log.message.includes('✗') ? 'text-red-400' :
+                                                        'text-slate-300'
+                                                    }>
+                                                        {log.message}
+                                                    </span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Last Price Info */}
+                                {eventMonitorData?.last_price_usd && (
+                                    <div className="bg-gradient-to-br from-emerald-50 to-white border border-emerald-200 rounded-xl p-4">
+                                        <div className="text-xs text-slate-500 mb-1">Last Updated Price</div>
+                                        <div className="text-2xl font-mono text-emerald-700">${eventMonitorData.last_price_usd}</div>
+                                        <div className="text-xs text-slate-500 mt-1">
+                                            {eventMonitorData.last_updated_at && (
+                                                <span>Updated: {new Date(eventMonitorData.last_updated_at * 1000).toLocaleString()}</span>
+                                            )}
+                                            {eventMonitorData.last_reason && (
+                                                <span className="ml-2">({eventMonitorData.last_reason})</span>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         )}
 
@@ -682,6 +881,28 @@ export default function Home() {
                                         {activeResponse.success ? 'SUCCESS' : 'FAILED'}
                                     </span>
                                 </div>
+                                {/* Show error summary for failed requests */}
+                                {!activeResponse.success && activeResponse.error && (
+                                    <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-4">
+                                        <p className="text-sm font-semibold text-red-700">{activeResponse.error}</p>
+                                        {activeResponse.data && typeof activeResponse.data === 'object' && (
+                                            <div className="mt-3 text-xs text-red-600 space-y-1">
+                                                {activeResponse.data.error && (
+                                                    <p><span className="font-semibold">Error Code:</span> {activeResponse.data.error}</p>
+                                                )}
+                                                {activeResponse.data.hint && (
+                                                    <p><span className="font-semibold">Hint:</span> {activeResponse.data.hint}</p>
+                                                )}
+                                                {activeResponse.data.tee_address && (
+                                                    <p><span className="font-semibold">TEE Address:</span> <code className="bg-red-100 px-1 rounded">{activeResponse.data.tee_address}</code></p>
+                                                )}
+                                                {activeResponse.data.contract_address && (
+                                                    <p><span className="font-semibold">Contract:</span> <code className="bg-red-100 px-1 rounded">{activeResponse.data.contract_address}</code></p>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
                                 <pre className="bg-slate-50 rounded-xl p-5 text-xs font-mono text-slate-700 overflow-auto max-h-[300px] border border-slate-200 whitespace-pre-wrap">
                                     {JSON.stringify(activeResponse.data || activeResponse.error, null, 2)}
                                 </pre>

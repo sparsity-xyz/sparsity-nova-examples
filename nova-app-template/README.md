@@ -174,8 +174,10 @@ Note: Per template configuration, on-chain settings are read from [enclave/confi
 `NovaAppBase` provides:
 - `setNovaRegistry(address)`
 - `registerTEEWallet(address)`
-- `updateStateHash(bytes32)`
-- `requestStateUpdate(bytes32)` (event trigger)
+
+`ETHPriceOracleApp` provides:
+- `stateHash` (public getter for off-chain verification)
+- `updateStateHash(bytes32)` (TEE updates after S3 save)
 
 `registerTEEWallet` is called by the Nova Registry after `setNovaRegistry` is configured.
 

@@ -31,7 +31,7 @@ from typing import Optional, TYPE_CHECKING, Dict, Any
 import requests
 from eth_hash.auto import keccak
 
-from chain import compute_state_hash, sign_update_state_hash, sign_update_eth_price
+from chain import compute_state_hash, sign_update_state_hash, sign_update_eth_price, rpc_call_with_failover
 from config import (
     RPC_URL,
     CONTRACT_ADDRESS,
@@ -250,25 +250,44 @@ def poll_contract_events():
 
     - Listens for StateUpdateRequested(bytes32,address) and anchors local state hash.
     - Listens for EthPriceUpdateRequested(uint256,address) and updates ETH price on-chain.
+
+    Logs are stored in app_state["data"]["event_monitor"] for frontend display.
     """
     if not (odyn and app_state and CONTRACT_ADDRESS):
         return
 
-    def rpc_call(method: str, params: list) -> Any:
-        payload = {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
-        res = requests.post(RPC_URL, json=payload, timeout=15)
-        res.raise_for_status()
-        data = res.json()
-        if "error" in data:
-            raise RuntimeError(data["error"])
-        return data["result"]
+    # Initialize monitor state early
+    monitor = app_state.setdefault("data", {}).setdefault("event_monitor", {})
 
-    current_block_hex = rpc_call("eth_blockNumber", [])
-    current_block = int(current_block_hex, 16)
+    def add_log(msg: str):
+        """Add a log entry to event monitor logs."""
+        logs = monitor.setdefault("logs", [])
+        timestamp = datetime.utcnow().isoformat() + "Z"
+        logs.append({"time": timestamp, "message": msg})
+        # Keep only last 100 logs
+        if len(logs) > 100:
+            monitor["logs"] = logs[-100:]
+        monitor["last_poll"] = timestamp
+
+    # Use rpc_call_with_failover from chain.py for automatic failover
+    rpc_call = rpc_call_with_failover
+
+    try:
+        current_block_hex = rpc_call("eth_blockNumber", [])
+        current_block = int(current_block_hex, 16)
+    except Exception as e:
+        add_log(f"✗ Failed to get current block: {e}")
+        return
 
     last_block = app_state["data"].get("last_processed_block")
     if last_block is None:
         last_block = max(current_block - 1, 0)
+
+    # Update monitor state
+    monitor = app_state.setdefault("data", {}).setdefault("event_monitor", {})
+    monitor["current_block"] = current_block
+    monitor["last_processed_block"] = last_block
+    monitor["contract_address"] = CONTRACT_ADDRESS
 
     # Event signature: StateUpdateRequested(bytes32,address)
     topic0 = "0x" + keccak(b"StateUpdateRequested(bytes32,address)").hex()
@@ -285,6 +304,7 @@ def poll_contract_events():
 
     if logs:
         app_state["data"]["last_event_count"] = app_state["data"].get("last_event_count", 0) + len(logs)
+        add_log(f"Found {len(logs)} StateUpdateRequested event(s)")
 
         state_hash = compute_state_hash(app_state.get("data", {}))
         app_state["data"]["last_state_hash"] = state_hash
@@ -298,24 +318,60 @@ def poll_contract_events():
             broadcast=BROADCAST_TX,
         )
         app_state["data"]["last_event_anchor_tx"] = signed
+        add_log(f"✓ State hash updated on-chain: {state_hash[:18]}...")
 
     # ---------------------------------------------------------------------
     # Oracle: EthPriceUpdateRequested(uint256,address)
     # ---------------------------------------------------------------------
     oracle_topic0 = "0x" + keccak(b"EthPriceUpdateRequested(uint256,address)").hex()
 
-    oracle_logs = rpc_call(
-        "eth_getLogs",
-        [{
-            "fromBlock": hex(max(current_block - ORACLE_EVENT_POLL_LOOKBACK_BLOCKS, 0)),
-            "toBlock": hex(current_block),
-            "address": CONTRACT_ADDRESS,
-            "topics": [oracle_topic0],
-        }],
-    )
+    try:
+        oracle_logs = rpc_call(
+            "eth_getLogs",
+            [{
+                "fromBlock": hex(max(current_block - ORACLE_EVENT_POLL_LOOKBACK_BLOCKS, 0)),
+                "toBlock": hex(current_block),
+                "address": CONTRACT_ADDRESS,
+                "topics": [oracle_topic0],
+            }],
+        )
+    except Exception as e:
+        add_log(f"✗ Failed to fetch oracle events: {e}")
+        oracle_logs = []
 
     oracle_state = app_state.setdefault("data", {}).setdefault("oracle", {})
     handled = oracle_state.setdefault("handled_requests", {})
+
+    # Count pending requests
+    pending_count = 0
+    for log in oracle_logs or []:
+        request_id_hex = log.get("topics", [None, None])[1]
+        if request_id_hex:
+            request_id = int(request_id_hex, 16)
+            if str(request_id) not in handled:
+                pending_count += 1
+
+    if pending_count > 0:
+        add_log(f"Found {pending_count} pending EthPriceUpdateRequested event(s)")
+
+    # Store recent events for frontend display
+    recent_events = []
+    for log in oracle_logs or []:
+        request_id_hex = log.get("topics", [None, None])[1]
+        if request_id_hex:
+            request_id = int(request_id_hex, 16)
+            block_num = int(log.get("blockNumber", "0x0"), 16)
+            tx_hash = log.get("transactionHash", "")
+            is_handled = str(request_id) in handled
+            recent_events.append({
+                "type": "EthPriceUpdateRequested",
+                "request_id": request_id,
+                "block_number": block_num,
+                "tx_hash": tx_hash,
+                "handled": is_handled,
+            })
+    monitor["recent_events"] = recent_events
+    monitor["pending_count"] = pending_count
 
     for log in oracle_logs or []:
         try:
@@ -327,6 +383,7 @@ def poll_contract_events():
             if request_id_key in handled:
                 continue
 
+            add_log(f"Processing request #{request_id}...")
             result = update_eth_price_on_chain(request_id=request_id, reason="onchain_event")
             handled[request_id_key] = {
                 "handled_at": datetime.utcnow().isoformat() + "Z",
@@ -334,7 +391,14 @@ def poll_contract_events():
                 "price_usd": result.get("price_usd"),
                 "updated_at": result.get("updated_at"),
             }
+            add_log(f"✓ Request #{request_id}: Updated price ${result.get('price_usd')}")
+            # Update recent_events to mark as handled
+            for ev in monitor.get("recent_events", []):
+                if ev.get("request_id") == request_id:
+                    ev["handled"] = True
+                    ev["price_usd"] = result.get("price_usd")
         except Exception as e:
+            add_log(f"✗ Request #{request_id}: Failed - {e}")
             logger.warning(f"Failed handling oracle request log: {e}")
 
     app_state["data"]["last_processed_block"] = current_block

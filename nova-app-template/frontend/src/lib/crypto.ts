@@ -652,6 +652,20 @@ export class EnclaveClient {
         const response = await fetch(`${this.enclaveBaseUrl}${endpoint}`, options);
 
         if (!response.ok) {
+            // Try to parse detailed error from response body
+            let detail: any;
+            try {
+                const body = await response.json();
+                detail = body.detail ?? body;
+            } catch {
+                detail = null;
+            }
+            if (detail && typeof detail === 'object' && detail.message) {
+                const err = new Error(detail.message) as any;
+                err.detail = detail;
+                err.status = response.status;
+                throw err;
+            }
             throw new Error(`Request failed: ${response.status} ${response.statusText}`);
         }
 

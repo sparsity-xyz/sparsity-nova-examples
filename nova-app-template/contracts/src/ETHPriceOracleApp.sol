@@ -13,6 +13,12 @@ import {NovaAppBase} from "./NovaAppBase.sol";
  *  - The enclave may also update periodically or via an API-triggered update.
  */
 contract ETHPriceOracleApp is NovaAppBase {
+    /// @notice The keccak256 hash of the current encrypted state blob
+    bytes32 public stateHash;
+
+    /// @notice Block number when state was last updated
+    uint256 public lastUpdatedBlock;
+
     /// @notice Latest ETH/USD price (integer USD, no decimals) written by the TEE
     uint256 public ethUsdPrice;
 
@@ -33,6 +39,9 @@ contract ETHPriceOracleApp is NovaAppBase {
         uint256 blockNumber
     );
 
+    /// @notice Emitted when state hash is updated
+    event StateUpdated(bytes32 indexed newHash, uint256 blockNumber);
+
     /**
      * @notice Emit an on-chain request for the enclave to update ETH/USD price.
      * @return requestId The request id for correlation.
@@ -48,7 +57,7 @@ contract ETHPriceOracleApp is NovaAppBase {
      * @param priceUsd ETH/USD as integer USD.
      * @param updatedAt Unix seconds timestamp.
      */
-    function updateEthPrice(uint256 requestId, uint256 priceUsd, uint256 updatedAt) external onlyTee {
+    function updateEthPrice(uint256 requestId, uint256 priceUsd, uint256 updatedAt) external onlyTEE {
         require(priceUsd > 0, "ETHPriceOracleApp: invalid price");
 
         ethUsdPrice = priceUsd;
@@ -56,4 +65,18 @@ contract ETHPriceOracleApp is NovaAppBase {
 
         emit EthPriceUpdated(requestId, priceUsd, updatedAt, block.number);
     }
+
+    /**
+     * @notice Update the state hash (called by TEE after state save)
+     * @param _newHash The keccak256 hash returned by Odyn's /v1/state/save
+     */
+    function updateStateHash(bytes32 _newHash) external onlyTEE {
+        require(_newHash != bytes32(0), "ETHPriceOracleApp: invalid hash");
+
+        stateHash = _newHash;
+        lastUpdatedBlock = block.number;
+
+        emit StateUpdated(_newHash, block.number);
+    }
+
 }

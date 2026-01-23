@@ -38,8 +38,8 @@ from eth_hash.auto import keccak
 from fastapi import APIRouter, HTTPException, Body, Response
 from pydantic import BaseModel
 
-from chain import compute_state_hash, sign_update_state_hash
-from chain import sign_update_eth_price
+from chain import compute_state_hash, sign_update_state_hash, get_onchain_state_hash
+from chain import sign_update_eth_price, rpc_call_with_failover
 from config import CONTRACT_ADDRESS, RPC_URL, CHAIN_ID, BROADCAST_TX, ANCHOR_ON_WRITE
 
 # Type hint for Odyn (actual import would cause circular dependency)
@@ -341,15 +341,23 @@ def save_to_storage(req: StorageRequest):
         raise HTTPException(status_code=500, detail="Odyn not initialized")
     
     try:
+        # Normalize value: if it's a string that looks like JSON, parse it first
+        store_value = req.value
+        if isinstance(req.value, str):
+            try:
+                store_value = json.loads(req.value)
+            except (json.JSONDecodeError, TypeError):
+                pass  # Keep as string if not valid JSON
+
         # Serialize value to JSON bytes
-        json_bytes = json.dumps(req.value).encode('utf-8')
+        json_bytes = json.dumps(store_value).encode('utf-8')
         
         # Save to S3
         success = odyn.s3_put(req.key, json_bytes, content_type=req.content_type)
         
         # Also update in-memory state
         if app_state:
-            app_state["data"][req.key] = req.value
+            app_state["data"][req.key] = store_value
         
         result: Dict[str, Any] = {
             "success": success,
@@ -357,23 +365,78 @@ def save_to_storage(req: StorageRequest):
             "message": "Data saved to S3 storage"
         }
 
-        # Anchor updated state hash on-chain (optional)
-        if success and app_state and ANCHOR_ON_WRITE and CONTRACT_ADDRESS:
-            state_hash = compute_state_hash(app_state["data"])
-            app_state["data"]["last_state_hash"] = state_hash
-            try:
-                anchor = sign_update_state_hash(
-                    odyn=odyn,
-                    contract_address=CONTRACT_ADDRESS,
-                    chain_id=CHAIN_ID,
-                    rpc_url=RPC_URL,
-                    state_hash=state_hash,
-                    broadcast=BROADCAST_TX,
-                )
-                result["state_hash"] = state_hash
-                result["anchor_tx"] = anchor
-            except Exception as e:
-                result["anchor_error"] = str(e)
+        # Anchor state hash on-chain for user_settings key
+        if success and req.key == "user_settings":
+            anchor_status: Dict[str, Any] = {}
+
+            if not CONTRACT_ADDRESS:
+                anchor_status["anchor_skipped"] = True
+                anchor_status["anchor_note"] = "App contract not configured (CONTRACT_ADDRESS is empty)"
+            else:
+                # Get TEE address
+                try:
+                    tee_address = odyn.eth_address()
+                    anchor_status["tee_address"] = tee_address
+                except Exception as e:
+                    anchor_status["anchor_error"] = f"Failed to get TEE wallet address: {e}"
+                    anchor_status["error_type"] = "tee_address_unavailable"
+                    result.update(anchor_status)
+                    return result
+
+                # Check TEE wallet balance
+                try:
+                    from chain import _rpc_call
+                    balance_hex = _rpc_call(RPC_URL, "eth_getBalance", [tee_address, "latest"])
+                    balance_wei = int(balance_hex, 16)
+                    balance_eth = balance_wei / 1e18
+                    anchor_status["tee_balance_eth"] = balance_eth
+                    if balance_wei == 0:
+                        anchor_status["anchor_error"] = f"TEE wallet {tee_address} has no funds. Please send some ETH to cover gas."
+                        anchor_status["error_type"] = "tee_wallet_no_funds"
+                        result.update(anchor_status)
+                        return result
+                except Exception as e:
+                    logger.warning(f"Failed to check TEE wallet balance: {e}")
+                    anchor_status["balance_check_error"] = str(e)
+
+                # Compute state hash (use normalized store_value, not raw req.value)
+                state_hash = compute_state_hash(store_value)
+                anchor_status["state_hash"] = state_hash
+                anchor_status["contract_address"] = CONTRACT_ADDRESS
+
+                # Sign and broadcast
+                try:
+                    anchor = sign_update_state_hash(
+                        odyn=odyn,
+                        contract_address=CONTRACT_ADDRESS,
+                        chain_id=CHAIN_ID,
+                        rpc_url=RPC_URL,
+                        state_hash=state_hash,
+                        broadcast=BROADCAST_TX,
+                    )
+                    anchor_status["anchor_tx"] = anchor
+                    anchor_status["broadcast"] = BROADCAST_TX
+
+                    # Check broadcast result
+                    if BROADCAST_TX and anchor.get("broadcasted") is False:
+                        anchor_status["anchor_error"] = anchor.get("broadcast_error", "Unknown broadcast error")
+                        anchor_status["error_type"] = "broadcast_failed"
+                except Exception as e:
+                    error_str = str(e).lower()
+                    anchor_status["anchor_error"] = str(e)
+                    if "insufficient funds" in error_str or "doesn't have enough funds" in error_str:
+                        anchor_status["error_type"] = "insufficient_funds"
+                        anchor_status["hint"] = f"TEE wallet {tee_address} does not have enough ETH for gas."
+                    elif "nonce" in error_str:
+                        anchor_status["error_type"] = "nonce_issue"
+                        anchor_status["hint"] = "Transaction nonce conflict. A previous tx may be pending."
+                    elif "execution reverted" in error_str:
+                        anchor_status["error_type"] = "execution_reverted"
+                        anchor_status["hint"] = "Contract call reverted. Check if TEE wallet is registered and authorized."
+                    else:
+                        anchor_status["error_type"] = "sign_or_broadcast_failed"
+
+            result.update(anchor_status)
 
         return result
     except Exception as e:
@@ -400,11 +463,44 @@ def load_from_storage(key: str):
         
         # Parse JSON
         value = json.loads(data.decode('utf-8'))
-        
-        return {
+
+        result: Dict[str, Any] = {
             "key": key,
             "value": value
         }
+
+        # Verify user_settings key against on-chain state hash
+        if key == "user_settings":
+            if not CONTRACT_ADDRESS:
+                result["verified"] = None
+                result["verification_note"] = "App contract not configured (CONTRACT_ADDRESS is empty)"
+            else:
+                # Normalize value: if it's a string that looks like JSON, parse it
+                verify_value = value
+                if isinstance(value, str):
+                    try:
+                        verify_value = json.loads(value)
+                    except (json.JSONDecodeError, TypeError):
+                        pass  # Keep as string if not valid JSON
+
+                if not isinstance(verify_value, dict):
+                    result["verified"] = None
+                    result["verification_note"] = "Cannot verify: stored value is not a JSON object"
+                else:
+                    onchain_hash = get_onchain_state_hash(rpc_url=RPC_URL, contract_address=CONTRACT_ADDRESS)
+                    computed_hash = compute_state_hash(verify_value)
+                    result["onchain_hash"] = onchain_hash
+                    result["computed_hash"] = computed_hash
+                    if not onchain_hash:
+                        result["verified"] = None
+                        result["verification_note"] = "On-chain state hash is empty (not yet anchored)"
+                    elif computed_hash.lower() == onchain_hash.lower():
+                        result["verified"] = True
+                    else:
+                        result["verified"] = False
+                        result["error"] = "State hash mismatch; S3 data is not trusted"
+
+        return result
     except HTTPException:
         raise
     except Exception as e:
@@ -562,8 +658,48 @@ def update_oracle_price_now():
         raise HTTPException(status_code=500, detail="Odyn not initialized")
 
     if not CONTRACT_ADDRESS:
-        raise HTTPException(status_code=400, detail="Contract not configured. Set CONTRACT_ADDRESS in enclave/config.py.")
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "contract_not_configured",
+                "message": "App contract not configured. Set CONTRACT_ADDRESS in enclave/config.py.",
+            },
+        )
 
+    # Get TEE wallet address for diagnostics
+    try:
+        tee_address = odyn.eth_address()
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "tee_address_unavailable",
+                "message": f"Failed to get TEE wallet address: {e}",
+            },
+        )
+
+    # Check TEE wallet balance
+    try:
+        balance_hex = _rpc_call("eth_getBalance", [tee_address, "latest"])
+        balance_wei = int(balance_hex, 16)
+        balance_eth = balance_wei / 1e18
+        if balance_wei == 0:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "tee_wallet_no_funds",
+                    "message": f"TEE wallet {tee_address} has no funds. Please send some ETH to cover gas.",
+                    "tee_address": tee_address,
+                    "balance_wei": balance_wei,
+                },
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning(f"Failed to check TEE wallet balance: {e}")
+        balance_eth = None
+
+    # Fetch ETH price
     try:
         res = requests.get(
             "https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd",
@@ -571,9 +707,19 @@ def update_oracle_price_now():
         )
         res.raise_for_status()
         price_usd = int(res.json()["ethereum"]["usd"])
+    except Exception as e:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "error": "price_fetch_failed",
+                "message": f"Failed to fetch ETH/USD price from CoinGecko: {e}",
+            },
+        )
 
-        updated_at = int(datetime.utcnow().timestamp())
+    updated_at = int(datetime.utcnow().timestamp())
 
+    # Sign and optionally broadcast
+    try:
         signed = sign_update_eth_price(
             odyn=odyn,
             contract_address=CONTRACT_ADDRESS,
@@ -584,44 +730,89 @@ def update_oracle_price_now():
             updated_at=updated_at,
             broadcast=BROADCAST_TX,
         )
-
-        if app_state is not None:
-            oracle_state = app_state.setdefault("data", {}).setdefault("oracle", {})
-            oracle_state["last_price_usd"] = price_usd
-            oracle_state["last_updated_at"] = updated_at
-            oracle_state["last_reason"] = "api"
-            oracle_state["last_tx"] = signed
-
-        return {
-            "success": True,
-            "contract_address": CONTRACT_ADDRESS,
-            "price_usd": price_usd,
-            "updated_at": updated_at,
-            "tx": signed,
-            "broadcast": BROADCAST_TX,
-        }
     except Exception as e:
-        logger.error(f"Oracle update-now failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        error_str = str(e).lower()
+        detail: Dict[str, Any] = {
+            "error": "sign_or_broadcast_failed",
+            "message": str(e),
+            "tee_address": tee_address,
+            "contract_address": CONTRACT_ADDRESS,
+        }
+        # Try to detect common issues
+        if "insufficient funds" in error_str or "doesn't have enough funds" in error_str:
+            detail["error"] = "insufficient_funds"
+            detail["hint"] = f"TEE wallet {tee_address} does not have enough ETH for gas."
+        elif "nonce" in error_str:
+            detail["error"] = "nonce_issue"
+            detail["hint"] = "Transaction nonce conflict. A previous tx may be pending."
+        elif "execution reverted" in error_str:
+            detail["error"] = "execution_reverted"
+            detail["hint"] = "Contract call reverted. Check if TEE wallet is registered and authorized."
+        raise HTTPException(status_code=500, detail=detail)
+
+    # Check broadcast result
+    if BROADCAST_TX and signed.get("broadcasted") is False:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "broadcast_failed",
+                "message": signed.get("broadcast_error", "Unknown broadcast error"),
+                "tee_address": tee_address,
+                "contract_address": CONTRACT_ADDRESS,
+                "raw_transaction": signed.get("raw_transaction"),
+            },
+        )
+
+    if app_state is not None:
+        oracle_state = app_state.setdefault("data", {}).setdefault("oracle", {})
+        oracle_state["last_price_usd"] = price_usd
+        oracle_state["last_updated_at"] = updated_at
+        oracle_state["last_reason"] = "api"
+        oracle_state["last_tx"] = signed
+
+    return {
+        "success": True,
+        "contract_address": CONTRACT_ADDRESS,
+        "tee_address": tee_address,
+        "tee_balance_eth": balance_eth,
+        "price_usd": price_usd,
+        "updated_at": updated_at,
+        "tx": signed,
+        "broadcast": BROADCAST_TX,
+    }
 
 
 def _rpc_call(method: str, params: list) -> Any:
-    payload = {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
-    res = requests.post(RPC_URL, json=payload, timeout=15)
-    res.raise_for_status()
-    data = res.json()
-    if "error" in data:
-        raise RuntimeError(data["error"])
-    return data["result"]
+    """RPC call with automatic failover to multiple RPC URLs."""
+    return rpc_call_with_failover(method, params)
 
 
 @router.get("/events/oracle")
 def get_oracle_events(lookback: int = 1000):
     """Return oracle-related contract events for the last N blocks."""
     if not CONTRACT_ADDRESS:
-        raise HTTPException(status_code=400, detail="Contract not configured. Set CONTRACT_ADDRESS in enclave/config.py.")
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "contract_not_configured",
+                "message": "App contract not configured.",
+                "hint": "Set CONTRACT_ADDRESS in enclave/config.py and restart the enclave.",
+            },
+        )
 
-    current_block_hex = _rpc_call("eth_blockNumber", [])
+    try:
+        current_block_hex = _rpc_call("eth_blockNumber", [])
+    except Exception as e:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "error": "rpc_failed",
+                "message": f"Failed to get current block number: {e}",
+                "hint": "Check RPC_URL in config.py and network connectivity.",
+                "rpc_url": RPC_URL,
+            },
+        )
+
     current_block = int(current_block_hex, 16)
     from_block = max(current_block - max(0, int(lookback)), 0)
 
@@ -629,25 +820,51 @@ def get_oracle_events(lookback: int = 1000):
     req_topic0 = "0x" + keccak(b"EthPriceUpdateRequested(uint256,address)").hex()
     upd_topic0 = "0x" + keccak(b"EthPriceUpdated(uint256,uint256,uint256,uint256)").hex()
 
-    req_logs = _rpc_call(
-        "eth_getLogs",
-        [{
-            "fromBlock": hex(from_block),
-            "toBlock": hex(current_block),
-            "address": CONTRACT_ADDRESS,
-            "topics": [req_topic0],
-        }],
-    )
+    try:
+        req_logs = _rpc_call(
+            "eth_getLogs",
+            [{
+                "fromBlock": hex(from_block),
+                "toBlock": hex(current_block),
+                "address": CONTRACT_ADDRESS,
+                "topics": [req_topic0],
+            }],
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "error": "rpc_failed",
+                "message": f"Failed to fetch EthPriceUpdateRequested logs: {e}",
+                "hint": "Check if CONTRACT_ADDRESS is correct and the contract is deployed.",
+                "contract_address": CONTRACT_ADDRESS,
+                "from_block": from_block,
+                "to_block": current_block,
+            },
+        )
 
-    upd_logs = _rpc_call(
-        "eth_getLogs",
-        [{
-            "fromBlock": hex(from_block),
-            "toBlock": hex(current_block),
-            "address": CONTRACT_ADDRESS,
-            "topics": [upd_topic0],
-        }],
-    )
+    try:
+        upd_logs = _rpc_call(
+            "eth_getLogs",
+            [{
+                "fromBlock": hex(from_block),
+                "toBlock": hex(current_block),
+                "address": CONTRACT_ADDRESS,
+                "topics": [upd_topic0],
+            }],
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "error": "rpc_failed",
+                "message": f"Failed to fetch EthPriceUpdated logs: {e}",
+                "hint": "Check if CONTRACT_ADDRESS is correct and the contract is deployed.",
+                "contract_address": CONTRACT_ADDRESS,
+                "from_block": from_block,
+                "to_block": current_block,
+            },
+        )
 
     handled = {}
     if app_state is not None:
@@ -699,6 +916,192 @@ def get_oracle_events(lookback: int = 1000):
         "to_block": current_block,
         "events": events,
         "handled_requests": handled,
+    }
+
+
+@router.post("/events/handle-pending")
+def handle_pending_requests(lookback: int = 1000):
+    """
+    Scan for pending EthPriceUpdateRequested events and handle each by
+    fetching ETH/USD and submitting updateEthPrice.
+    """
+    if not odyn:
+        raise HTTPException(status_code=500, detail="Odyn not initialized")
+
+    if not CONTRACT_ADDRESS:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "contract_not_configured",
+                "message": "App contract not configured. Set CONTRACT_ADDRESS in enclave/config.py.",
+            },
+        )
+
+    # Get current block
+    current_block_hex = _rpc_call("eth_blockNumber", [])
+    current_block = int(current_block_hex, 16)
+    from_block = max(current_block - max(0, int(lookback)), 0)
+
+    # Get request events
+    req_topic0 = "0x" + keccak(b"EthPriceUpdateRequested(uint256,address)").hex()
+    req_logs = _rpc_call(
+        "eth_getLogs",
+        [{
+            "fromBlock": hex(from_block),
+            "toBlock": hex(current_block),
+            "address": CONTRACT_ADDRESS,
+            "topics": [req_topic0],
+        }],
+    )
+
+    # Get already handled requests
+    if app_state is None:
+        handled = {}
+    else:
+        oracle_state = app_state.setdefault("data", {}).setdefault("oracle", {})
+        handled = oracle_state.setdefault("handled_requests", {})
+
+    # Find pending requests
+    pending = []
+    for log in req_logs or []:
+        topics = log.get("topics", [])
+        request_id = int(topics[1], 16) if len(topics) > 1 else 0
+        if str(request_id) not in handled:
+            pending.append({
+                "request_id": request_id,
+                "block_number": int(log.get("blockNumber", "0x0"), 16),
+                "tx_hash": log.get("transactionHash"),
+            })
+
+    if not pending:
+        return {
+            "processed_count": 0,
+            "message": "No pending requests to handle",
+            "results": [],
+        }
+
+    # Get TEE address and balance
+    try:
+        tee_address = odyn.eth_address()
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "tee_address_unavailable",
+                "message": f"Failed to get TEE wallet address: {e}",
+            },
+        )
+
+    try:
+        balance_hex = _rpc_call("eth_getBalance", [tee_address, "latest"])
+        balance_wei = int(balance_hex, 16)
+        if balance_wei == 0:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "tee_wallet_no_funds",
+                    "message": f"TEE wallet {tee_address} has no funds.",
+                    "tee_address": tee_address,
+                },
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning(f"Failed to check balance: {e}")
+
+    # Fetch ETH price once
+    try:
+        res = requests.get(
+            "https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd",
+            timeout=10,
+        )
+        res.raise_for_status()
+        price_usd = int(res.json()["ethereum"]["usd"])
+    except Exception as e:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "error": "price_fetch_failed",
+                "message": f"Failed to fetch ETH/USD price: {e}",
+            },
+        )
+
+    updated_at = int(datetime.utcnow().timestamp())
+
+    results = []
+    for req in pending:
+        request_id = req["request_id"]
+        try:
+            signed = sign_update_eth_price(
+                odyn=odyn,
+                contract_address=CONTRACT_ADDRESS,
+                chain_id=CHAIN_ID,
+                rpc_url=RPC_URL,
+                request_id=request_id,
+                price_usd=price_usd,
+                updated_at=updated_at,
+                broadcast=BROADCAST_TX,
+            )
+
+            # Mark as handled
+            handled[str(request_id)] = {
+                "price_usd": price_usd,
+                "updated_at": updated_at,
+                "tx_hash": signed.get("transaction_hash"),
+            }
+
+            results.append({
+                "request_id": request_id,
+                "success": True,
+                "price_usd": price_usd,
+                "tx_hash": signed.get("transaction_hash"),
+                "broadcasted": signed.get("broadcasted"),
+            })
+        except Exception as e:
+            results.append({
+                "request_id": request_id,
+                "success": False,
+                "error": str(e),
+            })
+
+    return {
+        "processed_count": len(pending),
+        "price_usd": price_usd,
+        "tee_address": tee_address,
+        "results": results,
+    }
+
+
+@router.get("/events/monitor")
+def get_event_monitor_status():
+    """
+    Get event monitor status and logs.
+
+    The enclave's background task polls for on-chain events and handles them automatically.
+    This endpoint returns the current status and recent logs for frontend display.
+    """
+    if app_state is None:
+        return {
+            "status": "not_initialized",
+            "message": "App state not initialized",
+        }
+
+    monitor = app_state.get("data", {}).get("event_monitor", {})
+    oracle = app_state.get("data", {}).get("oracle", {})
+
+    return {
+        "status": "active" if CONTRACT_ADDRESS else "not_configured",
+        "contract_address": CONTRACT_ADDRESS or None,
+        "current_block": monitor.get("current_block"),
+        "last_processed_block": monitor.get("last_processed_block"),
+        "last_poll": monitor.get("last_poll"),
+        "pending_count": monitor.get("pending_count", 0),
+        "recent_events": monitor.get("recent_events", []),
+        "logs": monitor.get("logs", [])[-30:],  # Last 30 logs
+        "handled_requests": oracle.get("handled_requests", {}),
+        "last_price_usd": oracle.get("last_price_usd"),
+        "last_updated_at": oracle.get("last_updated_at"),
+        "last_reason": oracle.get("last_reason"),
     }
 
 
