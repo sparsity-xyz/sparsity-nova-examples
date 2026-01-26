@@ -28,8 +28,10 @@ To run the application locally without a real TEE:
 1.  **Backend**:
     ```bash
     cd enclave
+    python3 -m venv .venv
+    source .venv/bin/activate
     pip install -r requirements.txt
-    IN_ENCLAVE=false python3 -m uvicorn app:app --host 0.0.0.0 --port 8000
+    IN_ENCLAVE=false python -m uvicorn app:app --host 0.0.0.0 --port 8000
     ```
 2.  **Frontend**:
     ```bash

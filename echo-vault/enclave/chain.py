@@ -7,7 +7,7 @@ from typing import Optional
 class Chain:
     """Helper for interacting with the blockchain via Helios RPC."""
     
-    DEFAULT_PUBLIC_RPC = "https://sepolia.base.org"
+    DEFAULT_MOCK_RPC = "http://odyn.sparsity.cloud:8545"
     DEFAULT_HELIOS_RPC = "http://127.0.0.1:8545"
 
     def __init__(self, rpc_url: Optional[str] = None):
@@ -15,7 +15,7 @@ class Chain:
             self.endpoint = rpc_url
         else:
             is_enclave = os.getenv("IN_ENCLAVE", "False").lower() == "true"
-            self.endpoint = self.DEFAULT_HELIOS_RPC if is_enclave else self.DEFAULT_PUBLIC_RPC
+            self.endpoint = self.DEFAULT_HELIOS_RPC if is_enclave else self.DEFAULT_MOCK_RPC
             
         self.w3 = Web3(Web3.HTTPProvider(self.endpoint))
         self.logger = logging.getLogger(__name__)
@@ -29,7 +29,7 @@ class Chain:
             try:
                 if self.w3.is_connected():
                     if not is_enclave:
-                        self.logger.info("Public RPC connected")
+                        self.logger.info("Mock RPC connected")
                         return True
                         
                     # Helios-specific sync check
@@ -39,11 +39,11 @@ class Chain:
                         if block > 0:
                             self.logger.info(f"Helios ready at block {block}")
                             return True
-                self.logger.info(f"Waiting for {'Helios' if is_enclave else 'Public'} RPC...")
+                self.logger.info(f"Waiting for {'Helios' if is_enclave else 'Mock'} RPC...")
             except Exception:
                 pass
             time.sleep(5)
-        raise TimeoutError(f"{'Helios' if is_enclave else 'Public'} RPC failed to connect in time")
+        raise TimeoutError(f"{'Helios' if is_enclave else 'Mock'} RPC failed to connect in time")
 
     def get_balance(self, address: str) -> int:
         return self.w3.eth.get_balance(Web3.to_checksum_address(address))
