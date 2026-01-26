@@ -1,4 +1,5 @@
 import logging
+import uvicorn
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
 from odyn import Odyn
@@ -73,6 +74,7 @@ async def get_status():
         "last_block": echo_task.last_block,
         "persisted_block": echo_task.persisted_block,
         "pending_count": len(echo_task.pending_echoes),
+        "note": "Attestation available at /.well-known/attestation or port 18001"
     }
 
 @app.get("/api/history")
@@ -85,3 +87,6 @@ async def get_attestation():
     # In a real app, you might want to return this as base64 or raw cbor
     import base64
     return {"attestation": base64.b64encode(att).decode()}
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8000)

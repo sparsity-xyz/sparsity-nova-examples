@@ -11,6 +11,7 @@ import {
   Check
 } from 'lucide-react'
 import clsx from 'clsx'
+import VerificationDialog from './components/VerificationDialog'
 
 const POLL_INTERVAL = 5000 // 5 seconds
 
@@ -61,12 +62,28 @@ function App() {
 
   const fetchAttestation = async () => {
     try {
-      const res = await fetch(getUrl('/.well-known/attestation'))
+      // Try local dev port first, fallback to app endpoint
+      // In production, Caddy might handle port 80/.well-known/attestation
+      let res;
+      try {
+        res = await fetch(getUrl('/.well-known/attestation'))
+      } catch (e) {
+        // Fallback or retry logic if needed
+        throw e;
+      }
+
+      if (!res.ok) throw new Error('Failed to fetch attestation')
+
       const data = await res.json()
-      setAttestationData(data.attestation)
+      setAttestationData({
+        attestation: data.attestation,
+        ethAddr: status?.address,
+        publicKey: 'Enclaver Internal' // Placeholder or fetch if available
+      })
       setShowAttestation(true)
     } catch (err) {
-      alert('Failed to fetch attestation')
+      console.error(err)
+      alert('Failed to fetch attestation. Ensure you are running in an environment that supports it.')
     }
   }
 
@@ -270,12 +287,35 @@ function App() {
                       ) : (
                         <span className="text-slate-600">---</span>
                       )}
-                      <div className="text-xs text-slate-500 font-medium">Sent: {formatEth(event.echo_value)} ETH</div>
+                      <div className="text-xs text-slate-500 font-medium">
+                        {event.status === 'success' ? (
+                          <div className="flex flex-col">
+                            <span>Sent: {formatEth(event.echo_value)} ETH</span>
+                            {event.gas_fee && (
+                              <span className="text-[10px] text-slate-500 font-medium">
+                                Fee: {formatEth(event.gas_fee)} ETH
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="flex flex-col">
+                            <span>{event.echo_value}</span>
+                            {event.status === 'skipped' && event.gas_fee && (
+                              <span className="text-[10px] text-slate-500 font-medium">
+                                Est. Fee: {formatEth(event.gas_fee)} ETH
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
                     </td>
                     <td className="px-8 py-6">
                       <span className={clsx(
                         "px-3 py-1 rounded-full text-xs font-bold tracking-widest uppercase",
-                        event.status === 'success' ? "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20" : "bg-red-500/10 text-red-500 border border-red-500/20"
+                        event.status === 'success' && "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20",
+                        event.status === 'failed' && "bg-red-500/10 text-red-500 border border-red-500/20",
+                        event.status === 'received' && "bg-blue-500/10 text-blue-500 border border-blue-500/20",
+                        event.status === 'skipped' && "bg-slate-500/10 text-slate-500 border border-slate-500/20"
                       )}>
                         {event.status}
                       </span>
@@ -288,28 +328,11 @@ function App() {
         </div>
       </div>
 
-      {/* Attestation Modal */}
-      {showAttestation && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-black/80 backdrop-blur-sm">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-2xl overflow-hidden shadow-2xl">
-            <div className="p-8 border-b border-slate-800 flex items-center justify-between">
-              <h2 className="text-2xl font-bold text-white flex items-center gap-3">
-                <ShieldCheck className="w-8 h-8 text-blue-500" />
-                TEE Attestation Data
-              </h2>
-              <button onClick={() => setShowAttestation(false)} className="text-slate-500 hover:text-white font-bold">Close</button>
-            </div>
-            <div className="p-8">
-              <p className="text-slate-400 mb-4 text-sm font-medium leading-relaxed">
-                This Base64-encoded CBOR document is proof that this application is running inside a verified TEE (AWS Nitro Enclave). It contains PCR hashes and the enclave's public key.
-              </p>
-              <div className="bg-black/50 rounded-xl p-4 font-mono text-xs text-blue-300 break-all h-64 overflow-y-auto border border-white/5">
-                {attestationData || 'Loading attestation...'}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      <VerificationDialog
+        isOpen={showAttestation}
+        onClose={() => setShowAttestation(false)}
+        data={attestationData}
+      />
     </div>
   )
 }

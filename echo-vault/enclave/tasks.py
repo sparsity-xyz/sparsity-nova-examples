@@ -126,8 +126,10 @@ class EchoTask:
                 raw_hash = tx['hash']
                 tx_hash = raw_hash.hex() if hasattr(raw_hash, 'hex') else str(raw_hash)
                 
-                # Check if already in pending (unlikely in one block, but safe)
+                # Check if already in pending or history (already handled)
                 if any(p['incoming_hash'] == tx_hash for p in self.pending_echoes):
+                    continue
+                if any(h['incoming_hash'] == tx_hash and h['status'] in ['success', 'skipped'] for h in self.history):
                     continue
                     
                 pending_item = {
@@ -137,6 +139,8 @@ class EchoTask:
                     "block_number": block_number
                 }
                 self.pending_echoes.append(pending_item)
+                # Record initial discovery in history
+                self._record_history(pending_item, None, "received", "Transfer detected")
                 found_any = True
 
         if found_any:
@@ -161,9 +165,9 @@ class EchoTask:
             gas_cost = gas_limit * max_fee
             
             if received_value <= gas_cost:
-                logger.warning(f"Received value {received_value} is less than gas cost {gas_cost}, skipping echo")
-                # Record as success because we handled it (no point retrying)
-                self._record_history(incoming_tx, None, "skipped", "Value less than gas cost")
+                logger.warning(f"Received value {received_value} is less than estimated gas cost {gas_cost}, skipping echo")
+                # Record as skipped because we handled it (no point retrying)
+                self._record_history(incoming_tx, None, "skipped", "Value less than gas cost", gas_fee=gas_cost)
                 return True
 
             echo_value = received_value - gas_cost
@@ -180,6 +184,8 @@ class EchoTask:
                 "value": hex(echo_value),
                 "data": "0x"
             }
+            
+            logger.info(f"Signing transaction: to={from_address}, value={echo_value} ({hex(echo_value)}), gas_limit={gas_limit}, max_fee={max_fee}")
 
             # Sign via Odyn
             signed_tx = self.odyn.sign_tx(tx_params)
@@ -189,27 +195,57 @@ class EchoTask:
             logger.info(f"Echoed transfer! Hash: {echo_hash}")
 
             # Update history
-            self._record_history(incoming_tx, echo_hash, "success", f"Echoed {echo_value} wei")
+            self._record_history(incoming_tx, echo_hash, "success", str(echo_value), gas_fee=gas_cost)
             self.processed_count += 1
             return True
             
         except Exception as e:
-            logger.error(f"Failed to echo transfer: {e}")
-            # Do NOT record in history here, as we want to retry it in the pending queue
-            # (Unless it's a known non-retryable error, but let's be safe and always retry)
+            error_msg = str(e)
+            if "already known" in error_msg.lower():
+                logger.info("Transaction already known to RPC, treating as success")
+                # We don't have the hash here easily, but the transaction is already in the pool
+                # We'll just update the status to success (the hash might be in history already if we just missed the return)
+                self._record_history(incoming_tx, None, "success", "Already submitted", gas_fee=gas_cost)
+                return True
+                
+            logger.error(f"Failed to echo transfer: {error_msg}")
+            # Record error in history so user can see it
+            self._record_history(incoming_tx, None, "failed", error_msg)
+            # Do NOT remove from pending_echoes so we can retry
             return False
 
-    def _record_history(self, incoming_tx: Dict[str, Any], echo_hash: Optional[str], status: str, detail: str = ""):
-        """Internal helper to log events to the memory history."""
-        event = {
-            "incoming_hash": incoming_tx["incoming_hash"],
-            "from": incoming_tx["from"],
-            "value": str(incoming_tx["value"]),
-            "echo_hash": echo_hash,
-            "echo_value": detail, # Storing detail string or value
-            "timestamp": int(time.time()),
-            "status": status
-        }
-        self.history.insert(0, event)
+    def _record_history(self, incoming_tx: Dict[str, Any], echo_hash: Optional[str], status: str, detail: str = "", gas_fee: Optional[int] = None):
+        """Internal helper to log events to the history. Updates existing entry if found."""
+        incoming_hash = incoming_tx["incoming_hash"]
+        
+        # Look for existing entry
+        existing = None
+        for item in self.history:
+            if item["incoming_hash"] == incoming_hash:
+                existing = item
+                break
+        
+        if existing:
+            # Update existing
+            existing["status"] = status
+            existing["echo_hash"] = echo_hash if echo_hash else existing["echo_hash"]
+            existing["echo_value"] = detail
+            if gas_fee is not None:
+                existing["gas_fee"] = str(gas_fee)
+            existing["timestamp"] = int(time.time())
+        else:
+            # Create new
+            event = {
+                "incoming_hash": incoming_hash,
+                "from": incoming_tx["from"],
+                "value": str(incoming_tx["value"]),
+                "echo_hash": echo_hash,
+                "echo_value": detail,
+                "gas_fee": str(gas_fee) if gas_fee is not None else None,
+                "timestamp": int(time.time()),
+                "status": status
+            }
+            self.history.insert(0, event)
+        
         if len(self.history) > 100:
             self.history.pop()
