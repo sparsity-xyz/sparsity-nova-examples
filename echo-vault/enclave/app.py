@@ -81,7 +81,7 @@ async def get_status():
 async def get_history():
     return echo_task.history
 
-@app.get("/.well-known/attestation")
+@app.post("/.well-known/attestation")
 async def get_attestation():
     att = odyn.get_attestation()
     # In a real app, you might want to return this as base64 or raw cbor

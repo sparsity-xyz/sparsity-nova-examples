@@ -66,7 +66,12 @@ function App() {
       // In production, Caddy might handle port 80/.well-known/attestation
       let res;
       try {
-        res = await fetch(getUrl('/.well-known/attestation'))
+        res = await fetch(getUrl('/.well-known/attestation'), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        })
       } catch (e) {
         // Fallback or retry logic if needed
         throw e;
@@ -324,6 +329,7 @@ function App() {
                         event.status === 'success' && "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20",
                         event.status === 'failed' && "bg-red-500/10 text-red-500 border border-red-500/20",
                         event.status === 'received' && "bg-blue-500/10 text-blue-500 border border-blue-500/20",
+                        event.status === 'processing' && "bg-amber-500/10 text-amber-500 border border-amber-500/20 animate-pulse",
                         event.status === 'skipped' && "bg-slate-500/10 text-slate-500 border border-slate-500/20"
                       )}>
                         {event.status}

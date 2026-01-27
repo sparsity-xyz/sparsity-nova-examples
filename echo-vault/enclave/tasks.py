@@ -117,6 +117,14 @@ class EchoTask:
                     self.pending_hashes.remove(tx_hash)
                     continue
 
+            # Update status to 'processing' before attempting the echo
+            tx_data.update({
+                "status": "processing",
+                "echo_value": "Preparing echo transaction...",
+                "timestamp": int(time.time())
+            })
+            self._save_transaction(tx_data)
+
             success = self._echo_transfer(tx_data, current_nonce)
             if success:
                 # If was successful (including non-retryable skips), remove from pending
@@ -231,23 +239,32 @@ class EchoTask:
             
             logger.info(f"Echoing transfer: {received_value} wei from {from_address} (hash: {tx_hash})")
 
+            # Get current balance to ensure we have enough funds
+            current_balance = self.chain.get_balance(self.address)
+            
             # Estimate fees
             priority_fee, max_fee = self.chain.estimate_fees()
             gas_limit = 21000 # Standard transfer
-            gas_cost = gas_limit * max_fee
             
-            if received_value <= gas_cost:
-                logger.warning(f"Received value {received_value} <= gas cost {gas_cost}, skipping")
+            # Use a 10% safety buffer for gas cost to prevent "insufficient funds" during fluctuations
+            estimated_gas_cost = gas_limit * max_fee
+            safe_gas_cost = int(estimated_gas_cost * 1.1)
+            
+            # Calculate available funds for echo (min of received or current balance)
+            available_funds = min(received_value, current_balance)
+            
+            if available_funds <= safe_gas_cost:
+                logger.warning(f"Available funds {available_funds} <= safe gas cost {safe_gas_cost}, skipping")
                 incoming_tx.update({
                     "status": "skipped",
                     "echo_value": "Value less than gas cost",
-                    "gas_fee": str(gas_cost),
+                    "gas_fee": str(safe_gas_cost),
                     "timestamp": int(time.time())
                 })
                 self._save_transaction(incoming_tx)
                 return True
 
-            echo_value = received_value - gas_cost
+            echo_value = available_funds - safe_gas_cost
             
             tx_params = {
                 "kind": "structured",
