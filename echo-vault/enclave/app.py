@@ -73,7 +73,7 @@ async def get_status():
         "processed_count": echo_task.processed_count,
         "last_block": echo_task.last_block,
         "persisted_block": echo_task.persisted_block,
-        "pending_count": len(echo_task.pending_echoes),
+        "pending_count": len(echo_task.pending_hashes),
         "note": "Attestation available at /.well-known/attestation or port 18001"
     }
 

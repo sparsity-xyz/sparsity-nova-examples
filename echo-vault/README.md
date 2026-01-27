@@ -7,20 +7,22 @@ Echo Vault is a TEE-backed vault whose behavior is simple, deterministic, and re
 Echo Vault consists of two main components:
 
 1.  **TEE Enclave (Backend)**:
-    *   Runs a Python FastAPI service.
-    *   Integrates the Helios light client for trustless, verified access to Base Sepolia.
-    *   Polls for incoming transfers and automatically echoes them back using Odyn's transaction signing API.
-    *   Persists progress (last scanned block) in S3.
+    *   **FastAPI Service**: Runs a Python backend within the Nitro Enclave.
+    *   **Trustless Helios Node**: Integrates the Helios light client for verified access to Base Sepolia, bypassing central RPC providers.
+    *   **Per-Transaction Persistence**: Stores each transaction's state individually in S3 (`echoes/<hash>.json`). Rebuilds history and processed state on startup.
+    *   **Resilient Sync**: Automatically detects and recovers from light client history limits (EIP-2935 buffer range), jumping to the latest block if offline too long.
+    *   **Batch Nonce Management**: Tracks nonces locally to support echoing multiple transactions in rapid succession or within the same block.
 2.  **Web Dashboard (Frontend)**:
-    *   React-based dashboard to monitor vault status.
-    *   Displays wallet address, balance, and transaction history.
-    *   Allows users to verify the TEE attestation.
+    *   **Vite/React UI**: A premium dashboard to monitor vault status.
+    *   **Real-time Activity Log**: Displays verified transaction history with timestamps and direct links to BaseScan.
+    *   **TEE Attestation**: Allows users to fetch and verify the hardware-backed Nitro attestation document.
 
 ## Quick Start
 
 ### Prerequisites
 - Python 3.12+
 - Node.js 18+
+- [Enclaver CLI](https://github.com/mclarkson/enclaver) (for TEE builds)
 
 ### Local Development (Mock Mode)
 To run the application locally without a real TEE:
@@ -40,12 +42,20 @@ To run the application locally without a real TEE:
     npm run dev
     ```
 
-### Deploy to Nova
-To build and prepare for deployment:
-```bash
-enclaver build .
-```
+### Build and Run as a Container
+
+To build the Docker image and run it locally as a container:
+
+1.  **Build the Image**:
+    ```bash
+    docker build -t echo-vault .
+    ```
+2.  **Run the Container**:
+    ```bash
+    docker run -p 8000:8000 -e IN_ENCLAVE=false echo-vault
+    ```
+    *This will start both the backend and frontend in mock mode at [http://localhost:8000](http://localhost:8000).*
 
 ## Security Model
 
-The vault's private key is derived within the enclave and never leaves the TEE. Every echo transaction is performed by the deterministic logic of the enclave, which is verifiable via remote attestation.
+The vault's private key is derived within the enclave and never leaves the TEE. Every echo transaction is performed by the deterministic logic of the enclave, which is verifiable via remote attestation. The use of Helios ensures that the enclave cannot be tricked by the host machine providing false blockchain data.

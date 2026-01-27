@@ -70,4 +70,5 @@ class Chain:
 
     def send_raw_transaction(self, signed_hex: str) -> str:
         tx_hash = self.w3.eth.send_raw_transaction(signed_hex)
-        return tx_hash.hex()
+        res = tx_hash.hex()
+        return res if res.startswith("0x") else f"0x{res}"

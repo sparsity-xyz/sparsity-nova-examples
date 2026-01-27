@@ -103,6 +103,11 @@ function App() {
     return `${addr.slice(0, 6)}...${addr.slice(-4)}`
   }
 
+  const formatTime = (ts) => {
+    if (!ts) return '...'
+    return new Date(ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  }
+
   if (loading && !status) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-slate-950 text-white">
@@ -249,6 +254,7 @@ function App() {
             <thead className="text-slate-500 font-mono text-xs uppercase tracking-widest">
               <tr>
                 <th className="px-8 py-4 font-bold border-b border-slate-800/50">Incoming Tx</th>
+                <th className="px-8 py-4 font-bold border-b border-slate-800/50">Time</th>
                 <th className="px-8 py-4 font-bold border-b border-slate-800/50">Amount Received</th>
                 <th className="px-8 py-4 font-bold border-b border-slate-800/50">Echo Tx</th>
                 <th className="px-8 py-4 font-bold border-b border-slate-800/50">Status</th>
@@ -257,7 +263,7 @@ function App() {
             <tbody className="divide-y divide-slate-800/50">
               {history.length === 0 ? (
                 <tr>
-                  <td colSpan="4" className="px-8 py-12 text-center text-slate-500 font-medium">
+                  <td colSpan="5" className="px-8 py-12 text-center text-slate-500 font-medium">
                     No transactions detected yet. Send some ETH to the vault!
                   </td>
                 </tr>
@@ -272,6 +278,9 @@ function App() {
                         </a>
                       </div>
                       <div className="text-xs text-slate-500 font-medium">From: {shortenAddr(event.from)}</div>
+                    </td>
+                    <td className="px-8 py-6">
+                      <div className="text-white font-mono text-sm">{formatTime(event.timestamp)}</div>
                     </td>
                     <td className="px-8 py-6">
                       <div className="text-white font-black">{formatEth(event.value)} <span className="text-slate-500">ETH</span></div>
