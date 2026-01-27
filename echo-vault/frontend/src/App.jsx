@@ -70,7 +70,8 @@ function App() {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'
-          }
+          },
+          body: JSON.stringify({})
         })
       } catch (e) {
         // Fallback or retry logic if needed
@@ -79,9 +80,13 @@ function App() {
 
       if (!res.ok) throw new Error('Failed to fetch attestation')
 
-      const data = await res.json()
+      const buffer = await res.arrayBuffer()
+      const base64Attestation = btoa(
+        new Uint8Array(buffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
+      )
+
       setAttestationData({
-        attestation: data.attestation,
+        attestation: base64Attestation,
         ethAddr: status?.address,
         publicKey: 'Enclaver Internal' // Placeholder or fetch if available
       })
@@ -100,7 +105,7 @@ function App() {
 
   const formatEth = (wei) => {
     if (!wei) return '0.00'
-    return (parseFloat(wei) / 1e18).toFixed(4)
+    return (parseFloat(wei) / 1e18).toFixed(6)
   }
 
   const shortenAddr = (addr) => {

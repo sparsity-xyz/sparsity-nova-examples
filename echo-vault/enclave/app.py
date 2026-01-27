@@ -7,7 +7,8 @@ from chain import Chain
 from tasks import EchoTask
 import os
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import RedirectResponse, FileResponse
+from fastapi.responses import RedirectResponse, FileResponse, Response
+from fastapi.middleware.cors import CORSMiddleware
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -38,6 +39,15 @@ async def lifespan(app: FastAPI):
     echo_task.is_running = False
 
 app = FastAPI(lifespan=lifespan)
+
+# Add CORS middleware to support cross-origin requests from frontend dev servers
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.get("/")
 async def root():
@@ -83,10 +93,13 @@ async def get_history():
 
 @app.post("/.well-known/attestation")
 async def get_attestation():
-    att = odyn.get_attestation()
-    # In a real app, you might want to return this as base64 or raw cbor
-    import base64
-    return {"attestation": base64.b64encode(att).decode()}
+    try:
+        att = odyn.get_attestation()
+        # Return raw binary CBOR data to match production behavior
+        return Response(content=att, media_type="application/octet-stream")
+    except Exception as e:
+        logger.error(f"Attestation failed: {e}")
+        return {"error": str(e)}, 500
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

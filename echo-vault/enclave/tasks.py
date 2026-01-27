@@ -251,10 +251,11 @@ class EchoTask:
             safe_gas_cost = int(estimated_gas_cost * 1.1)
             
             # Calculate available funds for echo (min of received or current balance)
-            available_funds = min(received_value, current_balance)
+            # If current_balance is less than gas but received_value is sufficient, 
+            # we should wait (retry) instead of skipping.
             
-            if available_funds <= safe_gas_cost:
-                logger.warning(f"Available funds {available_funds} <= safe gas cost {safe_gas_cost}, skipping")
+            if received_value <= safe_gas_cost:
+                logger.warning(f"Received value {received_value} <= safe gas cost {safe_gas_cost}, skipping permanently")
                 incoming_tx.update({
                     "status": "skipped",
                     "echo_value": "Value less than gas cost",
@@ -264,6 +265,12 @@ class EchoTask:
                 self._save_transaction(incoming_tx)
                 return True
 
+            if current_balance < safe_gas_cost:
+                logger.warning(f"RPC balance {current_balance} < gas cost {safe_gas_cost} but received {received_value}, waiting for balance sync...")
+                # Return False to trigger a retry in the main loop
+                return False
+
+            available_funds = min(received_value, current_balance)
             echo_value = available_funds - safe_gas_cost
             
             tx_params = {
@@ -289,7 +296,7 @@ class EchoTask:
                 "status": "success",
                 "echo_hash": echo_hash,
                 "echo_value": str(echo_value),
-                "gas_fee": str(gas_cost),
+                "gas_fee": str(safe_gas_cost),
                 "timestamp": int(time.time())
             })
             self._save_transaction(incoming_tx)
