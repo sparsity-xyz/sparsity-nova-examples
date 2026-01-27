@@ -170,10 +170,10 @@ class EchoTask:
                             self.persisted_block = current_block
                             break # Restart loop from new last_block
                 
-                time.sleep(10) # Poll every 10 seconds
+                time.sleep(2) # Poll every 2 seconds
             except Exception as e:
                 logger.error(f"Error in background task: {e}")
-                time.sleep(10)
+                time.sleep(2)
 
     def _process_block(self, block_number: int) -> bool:
         """Identifies transfers in a block and adds them to the pending queue."""
