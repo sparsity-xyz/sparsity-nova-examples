@@ -40,6 +40,8 @@ These challenges make enclave development inaccessible to most developers and si
 - Cryptographic random number generation (from NSM)
 - Hardware-level remote attestation
 - End-to-end encryption (ECDH + AES-256-GCM)
+- **S3 Storage**: Persistent, isolated storage for application state
+- **Helios RPC**: Trustless Ethereum/OP Stack light client for verified blockchain access
 
 ## 2. Application Packaging and Deployment
 
@@ -72,6 +74,8 @@ Inside the enclave, access Odyn's API service to use Nitro Enclave security feat
 
 ### API Reference
 
+**Core APIs:**
+
 | Endpoint                  | Method | Description                                  |
 |---------------------------|--------|----------------------------------------------|
 | `/v1/eth/address`         | GET    | Get enclave's Ethereum address and public key |
@@ -82,6 +86,15 @@ Inside the enclave, access Odyn's API service to use Nitro Enclave security feat
 | `/v1/encryption/public_key` | GET  | Get enclave's encryption public key          |
 | `/v1/encryption/encrypt`  | POST   | Encrypt data with client's public key        |
 | `/v1/encryption/decrypt`  | POST   | Decrypt data sent to the enclave             |
+
+**S3 Storage APIs:**
+
+| Endpoint       | Method | Description                                 |
+|----------------|--------|---------------------------------------------|
+| `/v1/s3/get`   | POST   | Retrieve a base64-encoded object from S3    |
+| `/v1/s3/put`   | POST   | Upload a base64-encoded object to S3        |
+| `/v1/s3/delete`| POST   | Delete an object from S3                    |
+| `/v1/s3/list`  | POST   | List objects with optional prefix filtering |
 
 > 📖 For complete API documentation with request/response examples, see: [Enclaver Internal API](https://github.com/sparsity-xyz/enclaver/blob/sparsity/docs/internal_api.md)
 
@@ -108,9 +121,9 @@ ENV IN_ENCLAVE=false  # Set to true in production
 
 ## 4. Reference Implementation
 
-Refer to the Odyn wrapper implementation in the `secured-chat-bot` example project:
+Refer to the Odyn wrapper implementation in the `echo-vault` example project, which is the latest and most comprehensive reference:
 
-📁 [`secured-chat-bot/enclave/odyn.py`](./secured-chat-bot/enclave/odyn.py)
+📁 [`echo-vault/enclave/odyn.py`](./echo-vault/enclave/odyn.py)
 
 This implementation demonstrates:
 - Automatic environment detection and endpoint switching
@@ -194,7 +207,7 @@ This approach allows users to access the complete application interface directly
    my-enclave-app/
    ├── enclave/
    │   ├── main.py
-   │   ├── odyn.py      # Copy from secured-chat-bot/enclave/odyn.py
+   │   ├── odyn.py      # Copy from echo-vault/enclave/odyn.py
    │   ├── requirements.txt
    │   └── Dockerfile
    └── frontend/        # Optional
@@ -203,7 +216,7 @@ This approach allows users to access the complete application interface directly
 
 2. **Copy Odyn Helper**
    ```bash
-   cp secured-chat-bot/enclave/odyn.py my-enclave-app/enclave/
+   cp echo-vault/enclave/odyn.py my-enclave-app/enclave/
    ```
 
 3. **Use Odyn Service**
@@ -227,6 +240,7 @@ This approach allows users to access the complete application interface directly
 
 | Example Project | Description |
 |-----------------|-------------|
+| [echo-vault](./echo-vault) | **Latest Reference**: Secure vault demonstrating **S3 Storage** persistence and **Helios RPC** (light client) integration |
 | [secured-chat-bot](./secured-chat-bot) | Secure chatbot demonstrating end-to-end encryption |
 | [rng-oracle](./oracles/rng-oracle) | RNG Oracle for verifiable on-chain random numbers |
 | [price-oracle](./oracles/price-oracle) | Price oracle demonstrating API signature verification |
