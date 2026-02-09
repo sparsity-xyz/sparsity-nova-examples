@@ -36,11 +36,11 @@ sequenceDiagram
 ## Quick Start
 
 ```bash
-# Backend (uses mock Odyn for local dev)
-cd enclave && pip install -r requirements.txt && python app.py
+# Build frontend and copy to enclave
+make build-frontend
 
-# Frontend (dev server)
-cd frontend && npm install && npm run dev
+# Run backend (uses mock Odyn for local dev)
+cd enclave && python app.py
 ```
 
 | Service          | URL                                |
@@ -66,10 +66,12 @@ secured-chat-bot/
 ├── enclave/           # Python Flask backend (runs in TEE)
 │   ├── app.py         # Main service
 │   ├── odyn.py        # TEE API wrapper
-│   └── Dockerfile
-└── frontend/          # Next.js frontend
-    ├── src/lib/       # crypto.ts, attestation.ts
-    └── src/components/# Chat UI
+│   └── frontend/      # Built frontend (ignored by git)
+├── frontend/          # Next.js frontend source
+├── Dockerfile         # Multi-stage build (builds frontend)
+├── enclaver.yaml      # TEE configuration
+├── Makefile           # Build automation
+└── README.md
 ```
 
 ## Deploy to Nova Platform

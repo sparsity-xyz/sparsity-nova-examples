@@ -2,7 +2,7 @@ version: v1
 name: "secured-chat-bot"
 target: "secured-chat-bot-enclave:latest"
 sources:
-  app: "secured-chat-bot:latest"
+  app: "."
   # odyn: "odyn-dev:latest"
   # sleeve: "enclaver-wrapper-base-dev:latest"
 defaults:
