@@ -1,7 +1,7 @@
 .PHONY: build-frontend clean
 
 build-frontend:
-	cd frontend && npm install && npm run build
+	cd frontend && npm ci && npm run build
 	mkdir -p enclave/frontend
 	cp -r frontend/out/* enclave/frontend/
 
