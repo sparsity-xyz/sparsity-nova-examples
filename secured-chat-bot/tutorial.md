@@ -75,15 +75,20 @@ sequenceDiagram
 
 ### 2.1 Project Structure
 
-The enclave application is a Python Flask service.
+The project root contains the build configuration and documentation, while the `enclave/` directory contains the backend service.
 
 ```
-enclave/
-├── app.py             # Flask service entry point
-├── odyn.py            # Odyn API wrapper (TEE services)
-├── ai_models/         # AI provider integrations (OpenAI, etc.)
-├── requirements.txt   # Python dependencies
-└── Dockerfile         # Container build
+secured-chat-bot/
+├── enclave/           # Python Flask backend
+│   ├── app.py         # Main service
+│   ├── odyn.py        # Odyn API wrapper
+│   └── ai_models/     # AI integrations
+├── frontend/          # Next.js frontend source
+├── Dockerfile         # Multi-stage build
+├── enclaver.yaml      # TEE configuration
+├── Makefile           # Build automation
+├── README.md          # Project overview
+└── tutorial.md        # This guide
 ```
 
 ### 2.2 Odyn Wrapper
@@ -156,40 +161,31 @@ The `attestation.ts` module handles the complex task of parsing AWS Nitro Enclav
 
 ### 4.1 Build the Frontend
 
-Before the enclave can serve the frontend, you must build it:
+Use the provided `Makefile` to build and bundle the frontend:
 
 ```bash
-cd frontend
-npm install
-npm run build
+make build-frontend
 ```
 
-This generates a static export in the `out/` directory.
+This runs `npm run build` and copies the static artifacts to `enclave/frontend/`.
 
 ### 4.2 Integration Testing
 
-1. Copy the built frontend to the enclave directory:
+1. Start the enclave backend locally:
    ```bash
-   cp -r out ../enclave/frontend
-   ```
-
-2. Start the enclave backend:
-   ```bash
-   cd ../enclave
+   cd enclave
    python app.py
    ```
 
-3. Access the application at `http://localhost:8000/frontend/`.
+2. Access the application at `http://localhost:8000/frontend/`.
 
 ---
 
 ## 5. Create Dockerfile
 
-The Dockerfile bundles the Python environment and the static frontend into a single image.
+The `Dockerfile` in the root uses a multi-stage build to compile the frontend and bundle it with the Python backend.
 
-📄 **Source**: [enclave/Dockerfile](enclave/Dockerfile)
-
-To build the image locally:
+To build the enclave image:
 ```bash
 docker build -t secured-chat-bot .
 ```
@@ -200,7 +196,7 @@ docker build -t secured-chat-bot .
 
 1. Go to [https://sparsity.cloud](https://sparsity.cloud)
 2. Create a new application
-3. Upload your `enclave/` directory (make sure it contains the `frontend/` build)
+3. Upload the `secured-chat-bot/` project directory (the platform will use the root `Dockerfile` and `enclaver.yaml`)
 4. Deploy the application
 5. Wait for the enclave to build and start
 
