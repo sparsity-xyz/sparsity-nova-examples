@@ -29,6 +29,14 @@ sys.modules["chain"].get_chain = MagicMock()
 sys.modules["web3"] = MagicMock()
 sys.modules["web3.exceptions"] = MagicMock()
 
+# Mock Contract for KMSRegistry
+mock_w3 = MagicMock()
+mock_contract = MagicMock()
+# Setup w3 chain connection
+sys.modules["chain"].get_chain.return_value.w3 = mock_w3
+# When contract() is called, return our mock contract
+mock_w3.eth.contract.return_value = mock_contract
+
 # Import config first to ensure mocks are in place, then app
 import config
 # Patch fixed parameters for test
