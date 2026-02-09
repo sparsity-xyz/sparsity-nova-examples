@@ -1,0 +1,16 @@
+version: v1
+name: "nova-kms-client"
+target: "nitro-enclave"
+
+sources:
+  - Dockerfile
+
+egress:
+  allow:
+    - 0.0.0.0/0:443
+    - 0.0.0.0/0:80
+
+env:
+  - IN_ENCLAVE
+  - SIMULATION_MODE
+  - KMS_NODES_FALLBACK
