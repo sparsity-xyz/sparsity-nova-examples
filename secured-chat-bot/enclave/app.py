@@ -128,57 +128,32 @@ if os.getenv("IN_DOCKER", "False").lower() != "true":
             return jsonify({"error": str(e)}), 500
 
 
+from openai import OpenAIError
+
 @app.route('/set-api-key', methods=['POST'])
 def set_api_key():
     """
     Set the cached API key (encrypted endpoint).
-    
-    Expected JSON body (encrypted format):
-    {
-        "nonce": "hex-encoded-32-bytes",
-        "public_key": "hex-encoded-DER-public-key",
-        "data": "hex-encoded-encrypted-json"
-    }
-    
-    The encrypted data should contain:
-    {
-        "api_key": "your-api-key",
-        "platform": "openai"  // optional, defaults to "openai"
-    }
-    
-    Returns encrypted response confirming the key was set.
     """
     global _cached_api_key, _cached_platform
     
     try:
         request_data = request.get_json()
-        
-        if not request_data:
-            return jsonify({"error": "Request body is required"}), 400
-        
-        # Must be encrypted request
-        if "nonce" not in request_data or "public_key" not in request_data or "data" not in request_data:
-            return jsonify({"error": "Encrypted request required (nonce, public_key, data)"}), 400
-        
-        nonce_hex = request_data.get("nonce", "")
-        client_public_key_hex = request_data.get("public_key", "")
-        encrypted_data_hex = request_data.get("data", "")
-        
-        if not nonce_hex or not client_public_key_hex or not encrypted_data_hex:
+        if not request_data or "nonce" not in request_data or "public_key" not in request_data or "data" not in request_data:
             return jsonify({"error": "nonce, public_key, and data are required"}), 400
         
+        nonce_hex = request_data["nonce"]
+        client_public_key_hex = request_data["public_key"]
+        encrypted_data_hex = request_data["data"]
+        
         # Decrypt the request
-        logger.info("Decrypting set-api-key request...")
         try:
-            decrypted_str = odyn.decrypt_data(
-                nonce_hex, client_public_key_hex, encrypted_data_hex
-            )
+            decrypted_str = odyn.decrypt_data(nonce_hex, client_public_key_hex, encrypted_data_hex)
             data = json.loads(decrypted_str)
         except Exception as e:
             logger.error(f"Decryption failed: {e}")
             return jsonify({"error": f"Decryption failed: {str(e)}"}), 400
         
-        # Extract and validate API key
         api_key = data.get("api_key", "")
         platform = data.get("platform", "openai")
         
@@ -186,14 +161,11 @@ def set_api_key():
             return jsonify({"error": "api_key is required"}), 400
         
         if platform not in PLATFORM_MAPPING:
-            return jsonify({
-                "error": f"Invalid platform: {platform}. Supported: {list(PLATFORM_MAPPING.keys())}"
-            }), 400
+            return jsonify({"error": f"Invalid platform: {platform}"}), 400
         
-        # Cache the API key (NEVER expose in response)
+        # Cache the API key
         _cached_api_key = api_key
         _cached_platform = platform
-        logger.info(f"API key cached for platform: {platform}")
         
         # Build encrypted response
         client_public_key_der = bytes.fromhex(client_public_key_hex)
@@ -214,13 +186,7 @@ def set_api_key():
             "public_key": server_public_key_hex,
             "encrypted_data": encrypted_response
         }
-        
-        signature = odyn.sign_message(encrypted_envelope)
-        
-        return jsonify({
-            "sig": signature,
-            "data": encrypted_envelope
-        })
+        return jsonify({"sig": odyn.sign_message(encrypted_envelope), "data": encrypted_envelope})
         
     except Exception as e:
         logger.error(f"Set API key error: {e}")
@@ -231,83 +197,84 @@ def set_api_key():
 def talk():
     """
     Main chat endpoint. Receives an encrypted message and returns an encrypted, signed AI response.
-    Uses cached API key if available.
-    
-    Expected JSON body (encrypted format):
-    {
-        "nonce": "hex-encoded-32-bytes",
-        "public_key": "hex-encoded-DER-public-key",
-        "data": "hex-encoded-encrypted-json"
-    }
-    
-    The encrypted data should contain:
-    {
-        "message": "Hello, AI!",
-        "ai_model": "gpt-4"  // optional, defaults to "gpt-4"
-    }
-    
-    Returns encrypted, signed response.
     """
     try:
         request_data = request.get_json()
-        
-        if not request_data:
-            return jsonify({"error": "Request body is required"}), 400
-        
-        # Must be encrypted request
-        if "nonce" not in request_data or "public_key" not in request_data or "data" not in request_data:
-            return jsonify({"error": "Encrypted request required (nonce, public_key, data)"}), 400
-        
-        nonce_hex = request_data.get("nonce", "")
-        client_public_key_hex = request_data.get("public_key", "")
-        encrypted_data_hex = request_data.get("data", "")
-        
-        if not nonce_hex or not client_public_key_hex or not encrypted_data_hex:
+        if not request_data or "nonce" not in request_data or "public_key" not in request_data or "data" not in request_data:
             return jsonify({"error": "nonce, public_key, and data are required"}), 400
         
+        nonce_hex = request_data["nonce"]
+        client_public_key_hex = request_data["public_key"]
+        encrypted_data_hex = request_data["data"]
+        
         # Decrypt the request
-        logger.info("Decrypting incoming request...")
         try:
-            decrypted_str = odyn.decrypt_data(
-                nonce_hex, client_public_key_hex, encrypted_data_hex
-            )
+            decrypted_str = odyn.decrypt_data(nonce_hex, client_public_key_hex, encrypted_data_hex)
             data = json.loads(decrypted_str)
         except Exception as e:
             logger.error(f"Decryption failed: {e}")
             return jsonify({"error": f"Decryption failed: {str(e)}"}), 400
         
         client_public_key_der = bytes.fromhex(client_public_key_hex)
-        
-        # Extract fields from decrypted data
         message = data.get("message", "")
         ai_model = data.get("ai_model", "gpt-4")
         
-        # Check if API key is cached
         if not _cached_api_key:
             return jsonify({"error": "API key not set. Call /set-api-key first."}), 400
-        
         if not message:
             return jsonify({"error": "message is required"}), 400
         
-        # Use cached platform
         platform = _cached_platform or "openai"
         platform_class = PLATFORM_MAPPING.get(platform)
-        
         if platform_class is None:
-            return jsonify({
-                "error": f"Invalid platform: {platform}. Supported: {list(PLATFORM_MAPPING.keys())}"
-            }), 400
-        
-        # Create platform client and validate model
-        client: Platform = platform_class(_cached_api_key)
-        if not client.check_support_model(ai_model):
-            return jsonify({
-                "error": f"Invalid model: {ai_model}. Supported for {platform}: {client.support_models}"
-            }), 400
+            return jsonify({"error": f"Invalid platform: {platform}"}), 400
+            
+        client_impl = platform_class(_cached_api_key)
+        if not client_impl.check_support_model(ai_model):
+            return jsonify({"error": f"Invalid model: {ai_model}"}), 400
         
         # Call AI model
-        logger.info(f"Calling {platform}/{ai_model} with message: {message[:50]}...")
-        resp_content, resp_timestamp = client.call(ai_model, message)
+        try:
+            resp_content, resp_timestamp = client_impl.call(ai_model, message)
+        except OpenAIError as e:
+            # Handle OpenAI specific errors (like 429 quota)
+            status_code = getattr(e, "status_code", 500)
+            logger.error(f"OpenAI error ({status_code}): {e}")
+            
+            # extract specific message from error if possible
+            error_msg = str(e)
+            if hasattr(e, "body") and isinstance(e.body, dict):
+                error_body = e.body.get("error", {})
+                if isinstance(error_body, dict):
+                    error_msg = error_body.get("message", error_msg)
+            
+            return jsonify({"error": f"AI Platform Error: {error_msg}"}), status_code
+        
+        # Build response data
+        response_data = {
+            "platform": platform,
+            "ai_model": ai_model,
+            "timestamp": resp_timestamp,
+            "message": message,
+            "response": resp_content
+        }
+        
+        # Encrypt the response
+        response_json = json.dumps(response_data, sort_keys=True, separators=(',', ':'))
+        encrypted_response, server_public_key_hex, response_nonce_hex = odyn.encrypt_data(
+            response_json, client_public_key_der
+        )
+        
+        encrypted_envelope = {
+            "nonce": response_nonce_hex,
+            "public_key": server_public_key_hex,
+            "encrypted_data": encrypted_response
+        }
+        return jsonify({"sig": odyn.sign_message(encrypted_envelope), "data": encrypted_envelope})
+        
+    except Exception as e:
+        logger.error(f"Talk error: {e}")
+        return jsonify({"error": str(e)}), 500
         
         # Build response data
         response_data = {

@@ -290,7 +290,10 @@ export class EnclaveClient {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(encrypted)
         });
-        if (!response.ok) throw new Error('Failed to set API key');
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.error || 'Failed to set API key');
+        }
         const result = await response.json();
         const decrypted = await this.decrypt(result.data);
         return JSON.parse(decrypted);
@@ -304,7 +307,10 @@ export class EnclaveClient {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(encrypted)
         });
-        if (!response.ok) throw new Error('Chat failed');
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.error || 'Chat failed');
+        }
         const result = await response.json();
         const decrypted = await this.decrypt(result.data);
         const parsed = JSON.parse(decrypted);
