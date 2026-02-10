@@ -254,15 +254,15 @@ class NovaRegistry:
         Execute a read-only registry call using eth_call_finalized.
         Encodes calldata using web3.py and decodes the result.
         """
-        # 1. Encode calldata
-        calldata = self.contract.encodeABI(fn_name=fn_name, args=args)
+        # 1. Encode calldata (web3 7.x)
+        fn = self.contract.get_function_by_name(fn_name)(*args)
+        calldata = fn._encode_transaction_data()
         
         # 2. Perform finalized call (raw bytes)
         # Prefer finalized reads where available for stronger consistency.
         raw_result = self.chain.eth_call_finalized(self.address, calldata)
         
         # 3. Decode result (web3 7.x: decode via ABI)
-        fn = self.contract.get_function_by_name(fn_name)
         decoded = _decode_outputs(getattr(fn, "abi", {}), raw_result)
         # web3.py returns a tuple of outputs. If the function returns a single
         # value (including a struct), that value is wrapped in a 1-tuple.

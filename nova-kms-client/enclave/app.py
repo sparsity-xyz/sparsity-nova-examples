@@ -14,6 +14,7 @@ import httpx
 import uvicorn
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
 import config
@@ -25,8 +26,8 @@ from nova_registry import NovaRegistry
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("nova-kms-client")
 
-# In-memory log storage (last 100 entries)
-MAX_LOGS = 100
+# In-memory log storage (keep last N entries)
+MAX_LOGS = 20
 request_logs = deque(maxlen=MAX_LOGS)
 
 class LogEntry(BaseModel):
@@ -408,6 +409,11 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down...")
 
 app = FastAPI(title="Nova KMS Client", lifespan=lifespan)
+
+
+@app.get("/", include_in_schema=False)
+def root():
+    return RedirectResponse(url="/docs")
 
 @app.get("/health")
 def health():
