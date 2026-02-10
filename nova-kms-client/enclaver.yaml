@@ -12,5 +12,3 @@ egress:
 
 env:
   - IN_ENCLAVE
-  - SIMULATION_MODE
-  - KMS_NODES_FALLBACK

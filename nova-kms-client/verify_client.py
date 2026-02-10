@@ -12,10 +12,9 @@ from unittest.mock import MagicMock, patch
 enclave_path = os.path.join(os.getcwd(), "enclave")
 sys.path.append(enclave_path)
 
-# Mock environment variables BEFORE importing config (for IN_ENCLAVE/SIMULATION_MODE)
-os.environ["KMS_NODES_FALLBACK"] = "http://mock-kms:8000"
+# This verification script runs fully mocked (no chain, no real HTTP).
+# Keep environment minimal; the example client itself is registry-only.
 os.environ["IN_ENCLAVE"] = "false"
-os.environ["SIMULATION_MODE"] = "true"
 
 # Mock Key components BEFORE importing config
 sys.modules["chain"] = MagicMock()
@@ -39,15 +38,20 @@ mock_w3.eth.contract.return_value = mock_contract
 
 # Import config first to ensure mocks are in place, then app
 import config
-# Patch fixed parameters for test
+# Patch fixed parameters for test (required for registry-only client)
 config.NOVA_APP_REGISTRY_ADDRESS = "0xMockNovaRegistry"
 config.KMS_REGISTRY_ADDRESS = "0xMockKMSRegistry"
 
 import app
 from app import KMSClient, request_logs
+import nova_registry
 
 async def run_verification():
     print("Starting verification...")
+
+    fixed_time = 1700000000
+    fixed_ts = str(int(fixed_time))
+    fixed_ts_b64 = __import__("base64").b64encode(fixed_ts.encode("utf-8")).decode("utf-8")
     
     # 1. Mock HTTPX Client
     mock_response_derive = MagicMock()
@@ -60,7 +64,11 @@ async def run_verification():
 
     mock_response_get = MagicMock()
     mock_response_get.status_code = 200
-    mock_response_get.json.return_value = {"value": "SGVsbG8gTm92YSBLTVM="} # Hello Nova KMS base64
+    mock_response_get.json.return_value = {"value": fixed_ts_b64}
+
+    mock_response_health = MagicMock()
+    mock_response_health.status_code = 200
+    mock_response_health.json.return_value = {"status": "ok"}
 
     mock_response_nonce = MagicMock()
     mock_response_nonce.status_code = 200
@@ -90,6 +98,8 @@ async def run_verification():
             return mock_response_nonce
         if "status" in str(url):
             return mock_response_status
+        if "/health" in str(url):
+            return mock_response_health
         if "derive" in str(url):
             return mock_response_derive
         if "data" in str(url) and method == "PUT":
@@ -100,13 +110,25 @@ async def run_verification():
 
     # Patch httpx.AsyncClient.request
     with patch("httpx.AsyncClient.request", side_effect=mock_request) as mock_req:
-                    
-        # Run one cycle
-        client = KMSClient()
-        
-        # Force nodes (skip discovery for this unit test)
-        with patch.object(client, 'get_kms_nodes', return_value=["http://mock-kms:8000"]):
-            await client.run_test_cycle()
+
+        # Freeze time used by the client so GET returns the expected timestamp
+        with patch.object(app.time, "time", return_value=fixed_time):
+            # Run one cycle
+            client = KMSClient()
+
+            mock_instance = MagicMock()
+            mock_instance.instance_id = 1
+            mock_instance.app_id = 1
+            mock_instance.version_id = 1
+            mock_instance.operator = "0xOp1"
+            mock_instance.instance_url = "http://mock-kms:4000"
+            mock_instance.tee_wallet_address = "0xKMSWallet"
+            mock_instance.zk_verified = True
+            mock_instance.status = nova_registry.InstanceStatus.ACTIVE
+
+            with patch.object(client, "get_operators", return_value=["0xOp1"]):
+                with patch.object(client, "get_instance", return_value=mock_instance):
+                    await client.run_test_cycle()
 
     # Check logs
     print("\nVerification Results:")

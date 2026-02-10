@@ -69,26 +69,6 @@ class Chain:
         raise TimeoutError("RPC failed to connect in time")
 
     # ------------------------------------------------------------------
-    # Basic queries
-    # ------------------------------------------------------------------
-
-    def get_nonce(self, address: str) -> int:
-        return self.w3.eth.get_transaction_count(Web3.to_checksum_address(address))
-
-    def get_balance_eth(self, address: str) -> float:
-        return self.w3.eth.get_balance(Web3.to_checksum_address(address)) / 1e18
-
-    def get_latest_block(self) -> int:
-        return self.w3.eth.block_number
-
-    def estimate_fees(self):
-        """Return (priority_fee, max_fee) for EIP-1559."""
-        priority_fee = self.w3.eth.max_priority_fee
-        base_fee = self.w3.eth.get_block("latest")["baseFeePerGas"]
-        max_fee = (base_fee * 2) + priority_fee
-        return priority_fee, max_fee
-
-    # ------------------------------------------------------------------
     # eth_call helper
     # ------------------------------------------------------------------
 

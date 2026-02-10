@@ -14,9 +14,12 @@ operator's instance details via ``NovaRegistry.get_instance_by_wallet()``.
 from __future__ import annotations
 
 import logging
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from web3 import Web3
+
+from chain import get_chain
+from config import KMS_REGISTRY_ADDRESS
 
 # =============================================================================
 # ABI Definition

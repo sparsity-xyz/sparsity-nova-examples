@@ -1,34 +1,33 @@
+"""nova-kms-client/enclave/config.py
+
+Static configuration for the Nova KMS Client example.
+
+This client is intended to run on Nova Platform and discover KMS nodes via:
+KMSRegistry -> NovaAppRegistry.
+
+Per request: this example does not support simulation mode and does not read
+runtime parameters from environment variables. Update the constants below
+before building/deploying.
 """
-Configuration for Nova KMS Client.
-"""
-import os
-import logging
 
-logger = logging.getLogger("nova-kms-client.config")
+# =============================================================================
+# Chain / Registry
+# =============================================================================
 
-# Environment / Defaults
-SIMULATION_MODE = os.getenv("SIMULATION_MODE", "0").lower() in ("1", "true", "yes")
-IN_ENCLAVE = os.getenv("IN_ENCLAVE", "false").lower() == "true"
+# Base Sepolia
+CHAIN_ID: int = 84532
 
-# Chain Configuration
-CHAIN_ID = 84532  # Base Sepolia
-RPC_URL = "http://odyn.sparsity.cloud:8545"
+# Minimum confirmations before trusting eth_call results.
+CONFIRMATION_DEPTH: int = 6
 
-# Registry Addresses (Fixed Parameters)
-# TODO: Replace with actual deployed addresses
-NOVA_APP_REGISTRY_ADDRESS = "0x0000000000000000000000000000000000000000"
-KMS_REGISTRY_ADDRESS = "0x0000000000000000000000000000000000000000"
+# Registry Addresses (MUST be configured for discovery)
+NOVA_APP_REGISTRY_ADDRESS: str = ""  # e.g. "0x..." (NovaAppRegistry proxy)
+KMS_REGISTRY_ADDRESS: str = ""       # e.g. "0x..." (KMSRegistry contract)
 
-if NOVA_APP_REGISTRY_ADDRESS == "0x0000000000000000000000000000000000000000":
-    logger.warning("NOVA_APP_REGISTRY_ADDRESS is not configured (using zero address). Service discovery will fail.")
+REGISTRY_CACHE_TTL_SECONDS: int = 60
 
-if KMS_REGISTRY_ADDRESS == "0x0000000000000000000000000000000000000000":
-    logger.warning("KMS_REGISTRY_ADDRESS is not configured (using zero address). KMS node discovery will fail.")
-
-REGISTRY_CACHE_TTL_SECONDS = 60
-
-# PoP Configuration
-POP_MAX_AGE_SECONDS = 120
-
+# =============================================================================
 # Scheduler
-TEST_CYCLE_INTERVAL_SECONDS = 10
+# =============================================================================
+
+TEST_CYCLE_INTERVAL_SECONDS: int = 30

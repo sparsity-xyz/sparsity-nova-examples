@@ -18,30 +18,17 @@ This example demonstrates how to build a client application that securely intera
 - `pip`
 - Access to a running `nova-kms` instance (simulation or production).
 
-## Running Locally (Simulation)
+## Configuration
 
-1.  **Install Dependencies**:
-    ```bash
-    cd enclave
-    pip install -r requirements.txt
-    ```
+This client discovers KMS nodes via on-chain registries:
 
-2.  **Run Client**:
-    You need to point the client to your KMS nodes. If running locally with `nova-kms` simulation on ports 8000/8001/8002:
+- `KMSRegistry` for the operator set
+- `NovaAppRegistry` for mapping operator wallet -> instance URL
 
-    ```bash
-    # Disable registries and manually point to local KMS nodes
-    export KMS_NODES_FALLBACK="http://localhost:8000,http://localhost:8001,http://localhost:8002"
-    export IN_ENCLAVE=false
-    export SIMULATION_MODE=true
-    
-    python app.py
-    ```
+Configure these addresses in `enclave/config.py` before building/deploying:
 
-3.  **Check Logs**:
-    ```bash
-    curl http://localhost:8080/logs
-    ```
+- `NOVA_APP_REGISTRY_ADDRESS`
+- `KMS_REGISTRY_ADDRESS`
 
 ## Running in Enclave (Production)
 
@@ -53,4 +40,6 @@ The client is designed to run as a Nova App.
     ```
 
 2.  **Deploy**:
-    Follow standard Nova deployment workflow. Ensure `KMS_REGISTRY_ADDRESS` and `NOVA_APP_REGISTRY_ADDRESS` are set in the deployment configuration.
+    Follow standard Nova deployment workflow.
+
+    Ensure `NOVA_APP_REGISTRY_ADDRESS` and `KMS_REGISTRY_ADDRESS` are correctly set in `enclave/config.py` in the image you deploy.

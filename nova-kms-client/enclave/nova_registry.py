@@ -4,24 +4,19 @@ NovaAppRegistry Python Wrapper (nova_registry.py)
 =============================================================================
 
 Read-only helpers for querying the NovaAppRegistry contract.
-Used by auth.py to verify requesting app instances.
-
-Includes a CachedNovaRegistry wrapper that adds TTL-based caching to
-reduce on-chain RPC calls during high-frequency API requests.
+Used by nova-kms-client to resolve KMS operator instances.
 """
 
 from __future__ import annotations
 
 import logging
-import threading
-import time
 from dataclasses import dataclass
 from enum import IntEnum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, List, Optional
 
 from web3 import Web3
 
-from chain import function_selector, encode_uint256, encode_address, get_chain
+from chain import get_chain
 from config import NOVA_APP_REGISTRY_ADDRESS, REGISTRY_CACHE_TTL_SECONDS
 
 logger = logging.getLogger("nova-kms.nova_registry")
@@ -320,90 +315,3 @@ class NovaRegistry:
         result = self._call("getInstancesForVersion", [app_id, version_id])
         # result is list of uint256
         return result
-
-
-# =============================================================================
-# Cached wrapper
-# =============================================================================
-
-class CachedNovaRegistry:
-    """
-    TTL-based caching wrapper around NovaRegistry.
-
-    Caches results of get_app, get_version, get_instance_by_wallet to
-    reduce on-chain RPC calls.  Cache entries expire after
-    REGISTRY_CACHE_TTL_SECONDS.
-
-    Implements the same public API as NovaRegistry so it can be used as a
-    drop-in replacement.
-    """
-
-    def __init__(self, inner: Optional[NovaRegistry] = None, ttl: Optional[int] = None):
-        self._inner = inner or NovaRegistry()
-        self._ttl = ttl if ttl is not None else REGISTRY_CACHE_TTL_SECONDS
-        self._cache: Dict[str, Tuple[float, Any]] = {}
-        self._lock = threading.Lock()
-
-    # Proxy attributes
-    @property
-    def address(self):
-        return self._inner.address
-
-    def _get_cached(self, key: str):
-        with self._lock:
-            entry = self._cache.get(key)
-            if entry and (time.time() - entry[0]) < self._ttl:
-                return entry[1]
-        return None
-
-    def _set_cached(self, key: str, value):
-        with self._lock:
-            self._cache[key] = (time.time(), value)
-
-    def invalidate(self, key: Optional[str] = None):
-        """Clear a specific cache entry or the entire cache."""
-        with self._lock:
-            if key:
-                self._cache.pop(key, None)
-            else:
-                self._cache.clear()
-
-    def get_app(self, app_id: int) -> App:
-        cache_key = f"app:{app_id}"
-        cached = self._get_cached(cache_key)
-        if cached is not None:
-            return cached
-        result = self._inner.get_app(app_id)
-        self._set_cached(cache_key, result)
-        return result
-
-    def get_version(self, app_id: int, version_id: int) -> AppVersion:
-        cache_key = f"version:{app_id}:{version_id}"
-        cached = self._get_cached(cache_key)
-        if cached is not None:
-            return cached
-        result = self._inner.get_version(app_id, version_id)
-        self._set_cached(cache_key, result)
-        return result
-
-    def get_instance(self, instance_id: int) -> RuntimeInstance:
-        cache_key = f"instance:{instance_id}"
-        cached = self._get_cached(cache_key)
-        if cached is not None:
-            return cached
-        result = self._inner.get_instance(instance_id)
-        self._set_cached(cache_key, result)
-        return result
-
-    def get_instance_by_wallet(self, wallet: str) -> RuntimeInstance:
-        cache_key = f"wallet:{wallet.lower()}"
-        cached = self._get_cached(cache_key)
-        if cached is not None:
-            return cached
-        result = self._inner.get_instance_by_wallet(wallet)
-        self._set_cached(cache_key, result)
-        return result
-
-    def get_instances_for_version(self, app_id: int, version_id: int) -> List[int]:
-        # Not cached — typically not called in hot paths
-        return self._inner.get_instances_for_version(app_id, version_id)
