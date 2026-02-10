@@ -241,7 +241,7 @@ class KMSClient:
                             resp = await self._signed_request(
                                 client,
                                 "POST",
-                                f"{inst_url}/kms/derive",
+                                f"{inst_url.rstrip('/')}/kms/derive",
                                 json={"path": fixed_path},
                             )
                             resp.raise_for_status()
@@ -278,7 +278,7 @@ class KMSClient:
                         resp = await self._signed_request(
                             client,
                             "PUT",
-                            f"{target['url']}/kms/data",
+                            f"{target['url'].rstrip('/')}/kms/data",
                             json={"key": data_key, "value": ts_b64, "ttl_ms": 0},
                         )
                         resp.raise_for_status()
@@ -300,7 +300,7 @@ class KMSClient:
                                 r = await self._signed_request(
                                     client,
                                     "GET",
-                                    f"{url}/kms/data/{data_key}",
+                                    f"{url.rstrip('/')}/kms/data/{data_key}",
                                 )
                                 if r.status_code == 404:
                                     await asyncio.sleep(1)
