@@ -19,7 +19,6 @@ from pydantic import BaseModel
 
 import config
 from odyn import Odyn
-from kms_registry import KMSRegistryClient
 from nova_registry import NovaRegistry
 
 # Configure logging
@@ -41,7 +40,6 @@ class LogEntry(BaseModel):
 class KMSClient:
     def __init__(self):
         self.odyn = Odyn()
-        self.kms_registry: Optional[KMSRegistryClient] = None
         self.nova_registry: Optional[NovaRegistry] = None
         self._kms_wallet_cache: Dict[str, str] = {}  # base_url -> kms_wallet
 
@@ -51,33 +49,88 @@ class KMSClient:
             a = addr.strip().lower()
             return a == "0x" + "0" * 40
 
-        if _is_zero_address(getattr(config, "KMS_REGISTRY_ADDRESS", "")):
-            raise RuntimeError(
-                "KMS_REGISTRY_ADDRESS must be configured in enclave/config.py (registry-only client)."
-            )
         if _is_zero_address(getattr(config, "NOVA_APP_REGISTRY_ADDRESS", "")):
             raise RuntimeError(
                 "NOVA_APP_REGISTRY_ADDRESS must be configured in enclave/config.py (registry-only client)."
             )
+
+        kms_app_id = int(getattr(config, "KMS_APP_ID", 0) or 0)
+        if kms_app_id <= 0:
+            raise RuntimeError("KMS_APP_ID must be configured in enclave/config.py")
         
         # Initialize on-chain registry clients
         try:
-            self.kms_registry = KMSRegistryClient(address=config.KMS_REGISTRY_ADDRESS)
             self.nova_registry = NovaRegistry(address=config.NOVA_APP_REGISTRY_ADDRESS)
                 
         except Exception as e:
              logger.error(f"Failed to initialize registries: {e}")
              raise
 
-    async def get_operators(self) -> List[str]:
-        if not self.kms_registry:
-            return []
-        return await asyncio.to_thread(self.kms_registry.get_operators)
+    async def get_kms_nodes(self) -> List[dict]:
+        """Discover KMS nodes via NovaAppRegistry.
 
-    async def get_instance(self, operator_wallet: str):
+        Algorithm:
+          1) app = getApp(KMS_APP_ID)
+          2) for version_id in 1..app.latest_version_id:
+                if getVersion(...).status == ENROLLED:
+                    instances = getInstancesForVersion(app_id, version_id)
+                    for each instance_id:
+                        inst = getInstance(instance_id)
+                        if inst.status == ACTIVE: include
+          3) merge all ACTIVE instances across ENROLLED versions (dedupe by tee wallet)
+        """
+        from nova_registry import InstanceStatus, VersionStatus
+
         if not self.nova_registry:
-            return None
-        return await asyncio.to_thread(self.nova_registry.get_instance_by_wallet, operator_wallet)
+            return []
+
+        kms_app_id = int(getattr(config, "KMS_APP_ID", 0) or 0)
+
+        app = await asyncio.to_thread(self.nova_registry.get_app, kms_app_id)
+        latest_version_id = int(getattr(app, "latest_version_id", 0) or 0)
+        if latest_version_id <= 0:
+            return []
+
+        nodes_by_wallet: Dict[str, dict] = {}
+
+        for version_id in range(1, latest_version_id + 1):
+            try:
+                ver = await asyncio.to_thread(self.nova_registry.get_version, kms_app_id, version_id)
+            except Exception:
+                continue
+
+            if getattr(ver, "status", None) != VersionStatus.ENROLLED:
+                continue
+
+            try:
+                instance_ids = await asyncio.to_thread(
+                    self.nova_registry.get_instances_for_version, kms_app_id, version_id
+                )
+            except Exception:
+                continue
+
+            for instance_id in instance_ids or []:
+                try:
+                    inst = await asyncio.to_thread(self.nova_registry.get_instance, int(instance_id))
+                except Exception:
+                    continue
+
+                if getattr(inst, "status", None) != InstanceStatus.ACTIVE:
+                    continue
+
+                tee_wallet = (getattr(inst, "tee_wallet_address", "") or "").lower()
+                if not tee_wallet:
+                    continue
+
+                inst_url = self._ensure_http(getattr(inst, "instance_url", ""))
+                nodes_by_wallet[tee_wallet] = {
+                    "instance": inst,
+                    "instance_url": inst_url,
+                    "version_id": getattr(inst, "version_id", None),
+                    "instance_id": getattr(inst, "instance_id", None),
+                }
+
+        return list(nodes_by_wallet.values())
 
     @staticmethod
     def _ensure_http(url: str) -> str:
@@ -165,11 +218,10 @@ class KMSClient:
 
 
     async def run_test_cycle(self):
-        """Scan all operators and verify consistency + sync.
+        """Scan all KMS nodes and verify consistency + sync.
 
         Cycle:
-          1) Fetch operators from KMSRegistry
-          2) Fetch each operator's instance from NovaAppRegistry
+                    1) Discover KMS nodes via NovaAppRegistry
           3) For ACTIVE instances, probe /health
           4) For reachable instances, request a fixed /kms/derive and compare results
           5) Randomly choose one reachable instance, write /kms/data with timestamp
@@ -183,9 +235,9 @@ class KMSClient:
         ts_b64 = base64.b64encode(ts_value.encode("utf-8")).decode("utf-8")
 
         try:
-            operators = await self.get_operators()
-            if not operators:
-                self._log("Scan", "Failed", error="No operators found in KMS registry")
+            nodes = await self.get_kms_nodes()
+            if not nodes:
+                self._log("Scan", "Failed", error="No KMS nodes found in NovaAppRegistry")
                 return
 
             results: List[dict] = []
@@ -194,7 +246,9 @@ class KMSClient:
 
             async with httpx.AsyncClient(timeout=10.0) as client:
                 # 1) Resolve instances
-                for op in operators:
+                for node in nodes:
+                    inst = node.get("instance")
+                    op = getattr(inst, "tee_wallet_address", None) if inst else None
                     row: dict = {
                         "operator": op,
                         "instance": None,
@@ -203,7 +257,6 @@ class KMSClient:
                         "data": None,
                     }
                     try:
-                        inst = await self.get_instance(op)
                         if inst is None:
                             row["instance"] = {"error": "instance lookup unavailable"}
                             results.append(row)
@@ -343,7 +396,7 @@ class KMSClient:
                 "ScanSummary",
                 overall,
                 details={
-                    "operator_count": len(operators),
+                    "node_count": len(nodes),
                     "reachable_count": len(reachable),
                     "fixed_derive_path": fixed_path,
                     "expected_derived_key": expected_key,
@@ -351,6 +404,10 @@ class KMSClient:
                     "results": results,
                 },
             )
+        except asyncio.CancelledError:
+            # Normal during Ctrl+C / application shutdown; don't surface as an error.
+            logger.info("Scan cycle cancelled (shutdown)")
+            return
         except Exception as exc:
             logger.error(f"Scan cycle failed: {exc}")
             self._log("ScanSummary", "Failed", error=str(exc))

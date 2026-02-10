@@ -22,7 +22,9 @@ CONFIRMATION_DEPTH: int = 6
 
 # Registry Addresses (MUST be configured for discovery)
 NOVA_APP_REGISTRY_ADDRESS: str = "0x0f68E6e699f2E972998a1EcC000c7ce103E64cc8"  # e.g. "0x..." (NovaAppRegistry proxy)
-KMS_REGISTRY_ADDRESS: str = "0x934744f9D931eF72d7fa10b07CD46BCFA54e8d88"       # e.g. "0x..." (KMSRegistry contract)
+
+# KMS App ID in the NovaAppRegistry
+KMS_APP_ID: int = 43
 
 REGISTRY_CACHE_TTL_SECONDS: int = 60
 
