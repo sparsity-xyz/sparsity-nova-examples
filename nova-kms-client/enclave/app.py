@@ -30,6 +30,65 @@ logger = logging.getLogger("nova-kms-client")
 MAX_LOGS = 20
 request_logs = deque(maxlen=MAX_LOGS)
 
+# =============================================================================
+# E2E Encryption Helpers
+# =============================================================================
+
+def encrypt_json_envelope(odyn: "Odyn", plaintext_dict: dict, receiver_tee_pubkey_hex: str) -> dict:
+    """
+    Encrypt a JSON payload for end-to-end encryption.
+    
+    Returns envelope: {
+        "sender_tee_pubkey": "<hex>",
+        "nonce": "<hex>",
+        "ciphertext": "<hex>"
+    }
+    """
+    import json
+    plaintext_json = json.dumps(plaintext_dict)
+    
+    # Get our own teePubkey
+    sender_pubkey_hex = odyn.get_encryption_public_key().get("public_key_der", "")
+    if sender_pubkey_hex.startswith("0x"):
+        sender_pubkey_hex = sender_pubkey_hex[2:]
+    
+    # Encrypt using Odyn (ECDH + AES-256-GCM)
+    enc_result = odyn.encrypt(plaintext_json, receiver_tee_pubkey_hex)
+    
+    nonce_hex = enc_result.get("nonce", "")
+    if nonce_hex.startswith("0x"):
+        nonce_hex = nonce_hex[2:]
+    
+    ciphertext_hex = enc_result.get("encrypted_data", "")
+    if ciphertext_hex.startswith("0x"):
+        ciphertext_hex = ciphertext_hex[2:]
+    
+    return {
+        "sender_tee_pubkey": sender_pubkey_hex,
+        "nonce": nonce_hex,
+        "ciphertext": ciphertext_hex,
+    }
+
+
+def decrypt_json_envelope(odyn: "Odyn", envelope: dict) -> dict:
+    """
+    Decrypt an E2E encrypted JSON envelope.
+    
+    Expected envelope format: {
+        "sender_tee_pubkey": "<hex>",
+        "nonce": "<hex>",
+        "ciphertext": "<hex>"
+    }
+    """
+    import json
+    sender_pubkey_hex = envelope["sender_tee_pubkey"]
+    nonce_hex = envelope["nonce"]
+    ciphertext_hex = envelope["ciphertext"]
+    
+    plaintext = odyn.decrypt(nonce_hex, sender_pubkey_hex, ciphertext_hex)
+    return json.loads(plaintext)
+
+
 class LogEntry(BaseModel):
     timestamp_ms: int
     kms_node_url: str
@@ -169,11 +228,13 @@ class KMSClient:
 
     async def _signed_request(self, client: httpx.AsyncClient, method: str, url: str, json: Optional[dict] = None) -> httpx.Response:
         """
-        Perform a request with full PoP authentication flow:
+        Perform a request with full PoP authentication flow and E2E encryption:
         1. GET /nonce from KMS node
         2. Sign (nonce + wallet + timestamp) using Odyn
-        3. Send request with X-App-* headers
-        4. Verify X-KMS-Response-Signature (H1 fix)
+        3. Encrypt request body with KMS node's teePubkey (E2E)
+        4. Send request with X-App-* headers
+        5. Verify X-KMS-Response-Signature (H1 fix)
+        6. Decrypt response body (E2E)
         """
         # 1. Get Nonce
         base_url = "/".join(url.split("/")[:3]) # http://host:port
@@ -185,13 +246,20 @@ class KMSClient:
         ts = str(int(time.time()))
         wallet = self.odyn.eth_address()
         
-        # Fetch KMS wallet (cached per node)
-        kms_wallet = self._kms_wallet_cache.get(base_url)
-        if not kms_wallet:
+        # Fetch KMS status (cached per node) - includes wallet and teePubkey
+        status_data = self._kms_wallet_cache.get(base_url)
+        if not status_data or not isinstance(status_data, dict):
             status_resp = await client.get(f"{base_url}/status")
             status_resp.raise_for_status()
-            kms_wallet = status_resp.json()["node"]["tee_wallet"]
-            self._kms_wallet_cache[base_url] = kms_wallet
+            status_json = status_resp.json()["node"]
+            status_data = {
+                "wallet": status_json["tee_wallet"],
+                "tee_pubkey": status_json.get("tee_pubkey", ""),
+            }
+            self._kms_wallet_cache[base_url] = status_data
+        
+        kms_wallet = status_data["wallet"]
+        kms_tee_pubkey = status_data.get("tee_pubkey", "")
 
         # Message format: NovaKMS:AppAuth:<Nonce>:<KMS_Wallet>:<Timestamp>
         message = f"NovaKMS:AppAuth:{nonce_b64}:{kms_wallet}:{ts}"
@@ -208,19 +276,27 @@ class KMSClient:
             "Content-Type": "application/json"
         }
         
-        # 3. Execute Request
+        # 3. E2E Encrypt request body if present
+        request_body = json
+        if json is not None and kms_tee_pubkey:
+            try:
+                request_body = encrypt_json_envelope(self.odyn, json, kms_tee_pubkey)
+            except Exception as exc:
+                logger.warning(f"Failed to encrypt request body: {exc}, sending plaintext")
+        
+        # 4. Execute Request
         if method == "POST":
-            resp = await client.post(url, json=json, headers=headers)
+            resp = await client.post(url, json=request_body, headers=headers)
         elif method == "PUT":
-            resp = await client.put(url, json=json, headers=headers)
+            resp = await client.put(url, json=request_body, headers=headers)
         elif method == "GET":
             resp = await client.get(url, headers=headers)
         elif method == "DELETE":
-            resp = await client.request("DELETE", url, json=json, headers=headers)
+            resp = await client.request("DELETE", url, json=request_body, headers=headers)
         else:
             raise ValueError(f"Unsupported method {method}")
 
-        # 4. Verify KMS response signature (H1 fix)
+        # 5. Verify KMS response signature (H1 fix)
         resp_sig = resp.headers.get("X-KMS-Response-Signature")
         if resp_sig:
             if not verify_response_signature(resp_sig, signature, kms_wallet):
@@ -236,7 +312,27 @@ class KMSClient:
             # Log but don't fail — server may be in dev/sim mode
             logger.debug(f"No X-KMS-Response-Signature header from {base_url}")
 
+        # 6. Decrypt E2E encrypted response
+        try:
+            resp_data = resp.json()
+            # Check if response is an encrypted envelope
+            if all(k in resp_data for k in ("sender_tee_pubkey", "nonce", "ciphertext")):
+                decrypted_data = decrypt_json_envelope(self.odyn, resp_data)
+                # Attach decrypted data to response for callers
+                resp._decrypted_json = decrypted_data
+            else:
+                resp._decrypted_json = resp_data
+        except Exception as exc:
+            logger.debug(f"Response decryption skipped: {exc}")
+            resp._decrypted_json = None
+
         return resp
+
+    def _get_response_json(self, resp: httpx.Response) -> dict:
+        """Get JSON from response, preferring decrypted data if available."""
+        if hasattr(resp, "_decrypted_json") and resp._decrypted_json is not None:
+            return resp._decrypted_json
+        return resp.json()
 
 
     async def run_test_cycle(self):
@@ -320,7 +416,7 @@ class KMSClient:
                                 json={"path": fixed_path},
                             )
                             resp.raise_for_status()
-                            body = resp.json()
+                            body = self._get_response_json(resp)
                             key_b64 = body.get("key")
                             if expected_key is None and key_b64:
                                 expected_key = key_b64
@@ -381,7 +477,7 @@ class KMSClient:
                                     await asyncio.sleep(1)
                                     continue
                                 r.raise_for_status()
-                                payload = r.json()
+                                payload = self._get_response_json(r)
                                 val_b64 = payload.get("value")
                                 val = base64.b64decode(val_b64).decode("utf-8") if val_b64 else None
                                 read_info.update({
