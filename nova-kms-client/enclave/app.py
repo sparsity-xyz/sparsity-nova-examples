@@ -20,6 +20,7 @@ from pydantic import BaseModel
 import config
 from odyn import Odyn
 from nova_registry import NovaRegistry
+from kms_identity import verify_instance_identity, verify_response_signature
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -122,6 +123,14 @@ class KMSClient:
                 if not tee_wallet:
                     continue
 
+                # H1 fix: verify teePubkey ↔ tee_wallet consistency on-chain
+                if not verify_instance_identity(inst):
+                    logger.warning(
+                        f"Skipping instance {instance_id}: "
+                        f"teePubkey/wallet inconsistency"
+                    )
+                    continue
+
                 inst_url = self._ensure_http(getattr(inst, "instance_url", ""))
                 nodes_by_wallet[tee_wallet] = {
                     "instance": inst,
@@ -164,9 +173,9 @@ class KMSClient:
         1. GET /nonce from KMS node
         2. Sign (nonce + wallet + timestamp) using Odyn
         3. Send request with X-App-* headers
+        4. Verify X-KMS-Response-Signature (H1 fix)
         """
         # 1. Get Nonce
-        # Need base URL + /nonce. Assuming url passed is the full target endpoint.
         base_url = "/".join(url.split("/")[:3]) # http://host:port
         nonce_resp = await client.get(f"{base_url}/nonce")
         nonce_resp.raise_for_status()
@@ -195,26 +204,39 @@ class KMSClient:
             "X-App-Signature": signature,
             "X-App-Nonce": nonce_b64,
             "X-App-Timestamp": ts,
-            "X-App-Wallet": wallet, # Optional hint
-            # In nova-kms dev/sim mode, identity is taken from header shims.
-            # Sending this alongside PoP keeps the client compatible with both
-            # dev/sim and production behavior.
-            "x-tee-wallet": wallet,
+            "X-App-Wallet": wallet,
             "Content-Type": "application/json"
         }
         
-        # 4. Execute Request
+        # 3. Execute Request
         if method == "POST":
-            return await client.post(url, json=json, headers=headers)
+            resp = await client.post(url, json=json, headers=headers)
         elif method == "PUT":
-            return await client.put(url, json=json, headers=headers)
+            resp = await client.put(url, json=json, headers=headers)
         elif method == "GET":
-            return await client.get(url, headers=headers)
+            resp = await client.get(url, headers=headers)
         elif method == "DELETE":
-             # httpx.delete doesn't accept json body in some versions, use client.request
-             return await client.request("DELETE", url, json=json, headers=headers)
+            resp = await client.request("DELETE", url, json=json, headers=headers)
         else:
-             raise ValueError(f"Unsupported method {method}")
+            raise ValueError(f"Unsupported method {method}")
+
+        # 4. Verify KMS response signature (H1 fix)
+        resp_sig = resp.headers.get("X-KMS-Response-Signature")
+        if resp_sig:
+            if not verify_response_signature(resp_sig, signature, kms_wallet):
+                logger.warning(
+                    f"KMS response signature verification FAILED for {base_url}"
+                )
+                raise httpx.HTTPStatusError(
+                    "KMS response signature verification failed",
+                    request=resp.request,
+                    response=resp,
+                )
+        else:
+            # Log but don't fail — server may be in dev/sim mode
+            logger.debug(f"No X-KMS-Response-Signature header from {base_url}")
+
+        return resp
 
 
     async def run_test_cycle(self):
