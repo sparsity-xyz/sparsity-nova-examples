@@ -6,7 +6,6 @@ import base64
 import logging
 import re
 import time
-import random
 from collections import deque
 from contextlib import asynccontextmanager
 from typing import Dict, List, Optional
@@ -71,9 +70,8 @@ def _render_table(headers: List[str], rows: List[List[str]]) -> str:
     caps = {
         "Wallet": 42,
         "URL": 48,
-        "DeriveB64": 28,
         "DeriveHex": 24,
-        "Data": 22,
+        "Readback": 22,
         "Error": 32,
     }
 
@@ -122,7 +120,7 @@ def _format_scan_summary(entry: dict) -> str:
 
     results = details.get("results") or []
 
-    # 1) Node list table (always first)
+    # 1) Node list table
     node_rows: List[List[str]] = []
     for idx, r in enumerate(results, start=1):
         inst = r.get("instance") or {}
@@ -133,6 +131,7 @@ def _format_scan_summary(entry: dict) -> str:
         status_name = status_info.get("name") or ""
         zk_verified = inst.get("zk_verified")
         connected = "yes" if conn.get("connected") else "no"
+        version_id = inst.get("version_id")
         node_rows.append([
             str(idx),
             str(wallet),
@@ -140,16 +139,17 @@ def _format_scan_summary(entry: dict) -> str:
             str(status_name),
             str(zk_verified) if zk_verified is not None else "",
             connected,
+            str(version_id) if version_id is not None else "",
         ])
-    nodes_table = _render_table(["#", "Wallet", "URL", "Status", "ZK", "Conn"], node_rows)
+    nodes_table = _render_table(["#", "Wallet", "URL", "Status", "ZK", "Conn", "VersionId"], node_rows)
 
-    # 2) Write section (separate)
+    # 2) Write section
     write = details.get("write") or {}
     if not write.get("performed"):
-        write_block = "Write:\n  (not performed)"
+        write_block = "2. KV Write:\n  (not performed)"
     else:
         write_block = (
-            "Write:\n"
+            "2. KV Write:\n"
             f"  node: {write.get('node_url')}\n"
             f"  key : {write.get('key')}\n"
             f"  value: {write.get('timestamp')}\n"
@@ -157,7 +157,7 @@ def _format_scan_summary(entry: dict) -> str:
             + (f"  error: {write.get('error')}\n" if write.get("error") else "")
         ).rstrip("\n")
 
-    # 3+4) Combined derive + data readback (two read results)
+    # 3) Combined derive + data readback
     combined_rows: List[List[str]] = []
     for idx, r in enumerate(results, start=1):
         inst = r.get("instance") or {}
@@ -166,7 +166,6 @@ def _format_scan_summary(entry: dict) -> str:
         data = r.get("data") or {}
 
         wallet = inst.get("tee_wallet") or r.get("operator") or ""
-        url = inst.get("instance_url") or ""
         derive_b64 = derive.get("key") if isinstance(derive, dict) else None
         derive_hex = _b64_to_hex(derive_b64)
         derive_ok = derive.get("matches_cluster") if isinstance(derive, dict) else None
@@ -183,34 +182,32 @@ def _format_scan_summary(entry: dict) -> str:
         combined_rows.append([
             str(idx),
             str(wallet),
-            str(url),
-            str(derive_b64 or ""),
             str(derive_hex or ""),
             str(derive_http) if derive_http is not None else "",
+            str(derive_ok) if derive_ok is not None else "",
             str(data_val or ""),
             str(data_http) if data_http is not None else "",
-            str(derive_ok) if derive_ok is not None else "",
             str(data_ok) if data_ok is not None else "",
             str(row_err),
         ])
     combined_table = _render_table(
-        ["#", "Wallet", "URL", "DeriveB64", "DeriveHex", "DeriveHTTP", "Data", "DataHTTP", "DeriveOK", "DataOK", "Error"],
+        ["#", "Wallet", "DeriveHex", "DeriveHTTP", "DeriveOK", "Readback", "ReadbackHTTP", "ReadbackOK", "Error"],
         combined_rows,
     )
 
     lines: List[str] = []
     lines.append(f"Run @ {ts_s} | status={status} | nodes={node_count} reachable={reachable_count}")
-    if fixed_path:
-        lines.append(f"Derive path: {fixed_path}")
     if err:
         lines.append(f"Error: {err}")
     lines.append("")
-    lines.append("Nodes:")
+    lines.append("1. Nodes:")
     lines.append(nodes_table)
     lines.append("")
     lines.append(write_block)
     lines.append("")
-    lines.append("Derive + Data Readback:")
+    lines.append("3. Derive + data readback:")
+    if fixed_path:
+        lines.append(f"   Derive path: {fixed_path}")
     lines.append(combined_table)
     return "\n".join(lines)
 
@@ -614,7 +611,7 @@ class KMSClient:
                         except Exception as exc:
                             row["derive"] = {"error": str(exc)}
 
-                        reachable.append({"operator": op, "url": inst_url})
+                        reachable.append({"operator": op, "url": inst_url, "instance_id": getattr(inst, "instance_id", None)})
                         results.append(row)
                     except Exception as exc:
                         row["instance"] = {"error": str(exc)}
@@ -623,7 +620,7 @@ class KMSClient:
                 # 4) Write timestamp KV to one reachable node
                 write_result: dict = {"performed": False}
                 if reachable:
-                    target = random.choice(reachable)
+                    target = min(reachable, key=lambda n: int(n.get("instance_id") or 0))
                     write_result = {
                         "performed": True,
                         "node_url": target["url"],
@@ -807,7 +804,8 @@ def get_logs():
                 f"status={e.get('status') if isinstance(e, dict) else ''} "
                 + (f"error={e.get('error')}" if isinstance(e, dict) and e.get("error") else "")
             )
-    return "\n\n".join(blocks) if blocks else "(no logs yet)"
+    separator = "\n" + "=" * 100 + "\n"
+    return separator.join(blocks) if blocks else "(no logs yet)"
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
