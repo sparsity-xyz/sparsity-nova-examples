@@ -33,12 +33,25 @@ Before trusting a KMS node's response, the client:
 from __future__ import annotations
 
 import logging
+import re
 from typing import Optional
 
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives import serialization
 
 logger = logging.getLogger("nova-kms-client.kms_identity")
+
+_ETH_WALLET_RE = re.compile(r"^(0x)?[0-9a-fA-F]{40}$")
+
+
+def _canonical_eth_wallet(wallet: str) -> str:
+    w = (wallet or "").strip()
+    if not w or not _ETH_WALLET_RE.match(w):
+        return w
+    w = w.lower()
+    if not w.startswith("0x"):
+        w = "0x" + w
+    return w
 
 
 # =========================================================================
@@ -196,19 +209,23 @@ def verify_response_signature(
     if not response_sig_hex or not client_sig_hex or not expected_kms_wallet:
         return False
 
+    expected_wallet = _canonical_eth_wallet(expected_kms_wallet)
+    if not expected_wallet:
+        return False
+
     try:
         from eth_account.messages import encode_defunct
         from eth_account import Account
 
-        message_text = f"NovaKMS:Response:{client_sig_hex}:{expected_kms_wallet}"
+        message_text = f"NovaKMS:Response:{client_sig_hex}:{expected_wallet}"
         message = encode_defunct(text=message_text)
         recovered = Account.recover_message(message, signature=response_sig_hex)
 
         from web3 import Web3
-        if Web3.to_checksum_address(recovered) != Web3.to_checksum_address(expected_kms_wallet):
+        if Web3.to_checksum_address(recovered) != Web3.to_checksum_address(expected_wallet):
             logger.warning(
                 f"Response signature mismatch: recovered {recovered}, "
-                f"expected {expected_kms_wallet}"
+                f"expected {expected_wallet}"
             )
             return False
         return True

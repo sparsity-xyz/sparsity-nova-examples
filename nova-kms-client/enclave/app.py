@@ -4,6 +4,7 @@ Nova KMS Client - Example Application
 import asyncio
 import base64
 import logging
+import re
 import time
 import random
 from collections import deque
@@ -25,6 +26,19 @@ from kms_identity import verify_instance_identity, verify_response_signature
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("nova-kms-client")
+
+_ETH_WALLET_RE = re.compile(r"^(0x)?[0-9a-fA-F]{40}$")
+
+
+def _canonical_eth_wallet(wallet: str) -> str:
+    """Canonical Ethereum wallet string: '0x' + 40 lowercase hex."""
+    w = (wallet or "").strip()
+    if not w or not _ETH_WALLET_RE.match(w):
+        return w
+    w = w.lower()
+    if not w.startswith("0x"):
+        w = "0x" + w
+    return w
 
 # In-memory log storage (keep last N entries)
 MAX_LOGS = 20
@@ -244,7 +258,7 @@ class KMSClient:
         
         # 2. Prepare PoP
         ts = str(int(time.time()))
-        wallet = self.odyn.eth_address()
+        wallet = _canonical_eth_wallet(self.odyn.eth_address())
         
         # Fetch KMS status (cached per node) - includes wallet and teePubkey
         status_data = self._kms_wallet_cache.get(base_url)
@@ -253,12 +267,12 @@ class KMSClient:
             status_resp.raise_for_status()
             status_json = status_resp.json()["node"]
             status_data = {
-                "wallet": status_json["tee_wallet"],
+                "wallet": _canonical_eth_wallet(status_json["tee_wallet"]),
                 "tee_pubkey": status_json.get("tee_pubkey", ""),
             }
             self._kms_wallet_cache[base_url] = status_data
         
-        kms_wallet = status_data["wallet"]
+        kms_wallet = _canonical_eth_wallet(status_data["wallet"])
         kms_tee_pubkey = status_data.get("tee_pubkey", "")
 
         # Message format: NovaKMS:AppAuth:<Nonce>:<KMS_Wallet>:<Timestamp>
@@ -599,4 +613,4 @@ def get_logs():
     return list(request_logs)
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8080)
