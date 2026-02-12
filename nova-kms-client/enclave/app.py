@@ -41,7 +41,7 @@ def encrypt_json_envelope(odyn: "Odyn", plaintext_dict: dict, receiver_tee_pubke
     Returns envelope: {
         "sender_tee_pubkey": "<hex>",
         "nonce": "<hex>",
-        "ciphertext": "<hex>"
+        "encrypted_data": "<hex>"
     }
     """
     import json
@@ -59,14 +59,14 @@ def encrypt_json_envelope(odyn: "Odyn", plaintext_dict: dict, receiver_tee_pubke
     if nonce_hex.startswith("0x"):
         nonce_hex = nonce_hex[2:]
     
-    ciphertext_hex = enc_result.get("encrypted_data", "")
-    if ciphertext_hex.startswith("0x"):
-        ciphertext_hex = ciphertext_hex[2:]
+    encrypted_data_hex = enc_result.get("encrypted_data", "")
+    if encrypted_data_hex.startswith("0x"):
+        encrypted_data_hex = encrypted_data_hex[2:]
     
     return {
         "sender_tee_pubkey": sender_pubkey_hex,
         "nonce": nonce_hex,
-        "ciphertext": ciphertext_hex,
+        "encrypted_data": encrypted_data_hex,
     }
 
 
@@ -77,15 +77,15 @@ def decrypt_json_envelope(odyn: "Odyn", envelope: dict) -> dict:
     Expected envelope format: {
         "sender_tee_pubkey": "<hex>",
         "nonce": "<hex>",
-        "ciphertext": "<hex>"
+        "encrypted_data": "<hex>"
     }
     """
     import json
     sender_pubkey_hex = envelope["sender_tee_pubkey"]
     nonce_hex = envelope["nonce"]
-    ciphertext_hex = envelope["ciphertext"]
+    encrypted_data_hex = envelope["encrypted_data"]
     
-    plaintext = odyn.decrypt(nonce_hex, sender_pubkey_hex, ciphertext_hex)
+    plaintext = odyn.decrypt(nonce_hex, sender_pubkey_hex, encrypted_data_hex)
     return json.loads(plaintext)
 
 
@@ -316,7 +316,7 @@ class KMSClient:
         try:
             resp_data = resp.json()
             # Check if response is an encrypted envelope
-            if all(k in resp_data for k in ("sender_tee_pubkey", "nonce", "ciphertext")):
+            if all(k in resp_data for k in ("sender_tee_pubkey", "nonce", "encrypted_data")):
                 decrypted_data = decrypt_json_envelope(self.odyn, resp_data)
                 # Attach decrypted data to response for callers
                 resp._decrypted_json = decrypted_data
