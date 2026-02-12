@@ -15,7 +15,7 @@ import httpx
 import uvicorn
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import RedirectResponse
+from fastapi.responses import PlainTextResponse, RedirectResponse
 from pydantic import BaseModel
 
 import config
@@ -40,9 +40,179 @@ def _canonical_eth_wallet(wallet: str) -> str:
         w = "0x" + w
     return w
 
-# In-memory log storage (keep last N entries)
-MAX_LOGS = 20
+# In-memory log storage (keep last N runs)
+MAX_LOGS = 10
 request_logs = deque(maxlen=MAX_LOGS)
+
+
+def _truncate(text: Optional[str], max_len: int) -> str:
+    s = "" if text is None else str(text)
+    if max_len <= 0:
+        return ""
+    if len(s) <= max_len:
+        return s
+    if max_len <= 1:
+        return s[:max_len]
+    return s[: max_len - 1] + "…"
+
+
+def _b64_to_hex(b64_text: Optional[str]) -> Optional[str]:
+    if not b64_text:
+        return None
+    try:
+        raw = base64.b64decode(b64_text)
+        return raw.hex()
+    except Exception:
+        return None
+
+
+def _render_table(headers: List[str], rows: List[List[str]]) -> str:
+    # Compute column widths (with hard caps to keep logs readable)
+    caps = {
+        "Wallet": 42,
+        "URL": 48,
+        "DeriveB64": 28,
+        "DeriveHex": 24,
+        "Data": 22,
+        "Error": 32,
+    }
+
+    def cap_for(h: str) -> int:
+        return caps.get(h, 24)
+
+    widths: List[int] = []
+    for col_idx, h in enumerate(headers):
+        w = min(len(h), cap_for(h))
+        for r in rows:
+            if col_idx < len(r):
+                w = max(w, min(len(r[col_idx]), cap_for(h)))
+        widths.append(w)
+
+    def fmt_row(cols: List[str]) -> str:
+        padded: List[str] = []
+        for i, h in enumerate(headers):
+            cell = cols[i] if i < len(cols) else ""
+            cell = _truncate(cell, widths[i])
+            padded.append(cell.ljust(widths[i]))
+        return "| " + " | ".join(padded) + " |"
+
+    sep = "+-" + "-+-".join("-" * w for w in widths) + "-+"
+    out = [sep, fmt_row(headers), sep]
+    for r in rows:
+        out.append(fmt_row(r))
+    out.append(sep)
+    return "\n".join(out)
+
+
+def _format_scan_summary(entry: dict) -> str:
+    ts_ms = entry.get("timestamp_ms")
+    status = entry.get("status")
+    err = entry.get("error")
+    details = entry.get("details") or {}
+
+    # Human timestamp
+    try:
+        ts_s = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime((ts_ms or 0) / 1000))
+    except Exception:
+        ts_s = str(ts_ms)
+
+    node_count = details.get("node_count")
+    reachable_count = details.get("reachable_count")
+    fixed_path = details.get("fixed_derive_path")
+
+    results = details.get("results") or []
+
+    # 1) Node list table (always first)
+    node_rows: List[List[str]] = []
+    for idx, r in enumerate(results, start=1):
+        inst = r.get("instance") or {}
+        conn = r.get("connection") or {}
+        wallet = inst.get("tee_wallet") or r.get("operator") or ""
+        url = inst.get("instance_url") or ""
+        status_info = inst.get("status") or {}
+        status_name = status_info.get("name") or ""
+        zk_verified = inst.get("zk_verified")
+        connected = "yes" if conn.get("connected") else "no"
+        node_rows.append([
+            str(idx),
+            str(wallet),
+            str(url),
+            str(status_name),
+            str(zk_verified) if zk_verified is not None else "",
+            connected,
+        ])
+    nodes_table = _render_table(["#", "Wallet", "URL", "Status", "ZK", "Conn"], node_rows)
+
+    # 2) Write section (separate)
+    write = details.get("write") or {}
+    if not write.get("performed"):
+        write_block = "Write:\n  (not performed)"
+    else:
+        write_block = (
+            "Write:\n"
+            f"  node: {write.get('node_url')}\n"
+            f"  key : {write.get('key')}\n"
+            f"  value: {write.get('timestamp')}\n"
+            + (f"  http : {write.get('http_status')}\n" if write.get("http_status") is not None else "")
+            + (f"  error: {write.get('error')}\n" if write.get("error") else "")
+        ).rstrip("\n")
+
+    # 3+4) Combined derive + data readback (two read results)
+    combined_rows: List[List[str]] = []
+    for idx, r in enumerate(results, start=1):
+        inst = r.get("instance") or {}
+        conn = r.get("connection") or {}
+        derive = r.get("derive") or {}
+        data = r.get("data") or {}
+
+        wallet = inst.get("tee_wallet") or r.get("operator") or ""
+        url = inst.get("instance_url") or ""
+        derive_b64 = derive.get("key") if isinstance(derive, dict) else None
+        derive_hex = _b64_to_hex(derive_b64)
+        derive_ok = derive.get("matches_cluster") if isinstance(derive, dict) else None
+        derive_http = derive.get("http_status") if isinstance(derive, dict) else None
+
+        data_val = data.get("value") if isinstance(data, dict) else None
+        data_ok = data.get("matches_written") if isinstance(data, dict) else None
+        data_http = data.get("http_status") if isinstance(data, dict) else None
+
+        derive_err = derive.get("error") if isinstance(derive, dict) else None
+        data_err = data.get("error") if isinstance(data, dict) else None
+        row_err = derive_err or data_err or ""
+
+        combined_rows.append([
+            str(idx),
+            str(wallet),
+            str(url),
+            str(derive_b64 or ""),
+            str(derive_hex or ""),
+            str(derive_http) if derive_http is not None else "",
+            str(data_val or ""),
+            str(data_http) if data_http is not None else "",
+            str(derive_ok) if derive_ok is not None else "",
+            str(data_ok) if data_ok is not None else "",
+            str(row_err),
+        ])
+    combined_table = _render_table(
+        ["#", "Wallet", "URL", "DeriveB64", "DeriveHex", "DeriveHTTP", "Data", "DataHTTP", "DeriveOK", "DataOK", "Error"],
+        combined_rows,
+    )
+
+    lines: List[str] = []
+    lines.append(f"Run @ {ts_s} | status={status} | nodes={node_count} reachable={reachable_count}")
+    if fixed_path:
+        lines.append(f"Derive path: {fixed_path}")
+    if err:
+        lines.append(f"Error: {err}")
+    lines.append("")
+    lines.append("Nodes:")
+    lines.append(nodes_table)
+    lines.append("")
+    lines.append(write_block)
+    lines.append("")
+    lines.append("Derive + Data Readback:")
+    lines.append(combined_table)
+    return "\n".join(lines)
 
 # =============================================================================
 # E2E Encryption Helpers
@@ -110,6 +280,7 @@ class LogEntry(BaseModel):
     status: str
     details: Optional[Dict] = None
     error: Optional[str] = None
+    text: Optional[str] = None
 
 class KMSClient:
     def __init__(self):
@@ -545,15 +716,24 @@ class KMSClient:
             self._log("ScanSummary", "Failed", error=str(exc))
 
     def _log(self, action: str, status: str, kms_node_url: str = "N/A", details: Optional[Dict] = None, error: Optional[str] = None):
-        entry = LogEntry(
-            timestamp_ms=int(time.time() * 1000),
-            kms_node_url=kms_node_url,
-            action=action,
-            status=status,
-            details=details,
-            error=error
-        )
-        request_logs.appendleft(entry.model_dump()) # Newest first
+        entry_dict = {
+            "timestamp_ms": int(time.time() * 1000),
+            "kms_node_url": kms_node_url,
+            "action": action,
+            "status": status,
+            "details": details,
+            "error": error,
+        }
+
+        # For the periodic run summary, also store a human-readable text block.
+        if action == "ScanSummary":
+            try:
+                entry_dict["text"] = _format_scan_summary(entry_dict)
+            except Exception as exc:
+                entry_dict["text"] = f"(failed to format log: {exc})"
+
+        entry = LogEntry(**entry_dict)
+        request_logs.appendleft(entry.model_dump())  # Newest first
         logger.info(f"[{status}] {action} (Node: {kms_node_url}): {error if error else ''}")
 
 
@@ -608,9 +788,26 @@ def root():
 def health():
     return {"status": "healthy"}
 
-@app.get("/logs")
+@app.get("/logs", response_class=PlainTextResponse)
 def get_logs():
-    return list(request_logs)
+    # Render newest-first run history as plain text.
+    blocks: List[str] = []
+    for e in list(request_logs):
+        if isinstance(e, dict) and e.get("text"):
+            blocks.append(str(e["text"]))
+        else:
+            # Fallback for non-ScanSummary entries
+            ts_ms = e.get("timestamp_ms") if isinstance(e, dict) else None
+            try:
+                ts_s = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime((ts_ms or 0) / 1000))
+            except Exception:
+                ts_s = str(ts_ms)
+            blocks.append(
+                f"{ts_s} | action={e.get('action') if isinstance(e, dict) else ''} "
+                f"status={e.get('status') if isinstance(e, dict) else ''} "
+                + (f"error={e.get('error')}" if isinstance(e, dict) and e.get("error") else "")
+            )
+    return "\n\n".join(blocks) if blocks else "(no logs yet)"
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
