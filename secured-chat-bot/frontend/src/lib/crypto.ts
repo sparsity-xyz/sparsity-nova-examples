@@ -1,8 +1,13 @@
 /**
- * Crypto module for ECDH + AES-GCM.
+ * Crypto module for ECDH + HKDF-SHA256 + AES-256-GCM.
  * 
  * Supports both P-384 (Odyn standard) and secp256k1 (ETH signing key) for encryption.
  * Automatically detects the curve from the enclave's public key.
+ *
+ * Key derivation (new protocol):
+ *   salt  = sorted(pubkey_A_sec1, pubkey_B_sec1) || nonce
+ *   info  = "enclaver-ecdh-aes256gcm-v1"
+ *   key   = HKDF-SHA256(IKM=shared_secret, salt, info, length=32)
  */
 
 import * as secp256k1 from '@noble/secp256k1';
@@ -33,6 +38,16 @@ function bufferToHex(buffer: ArrayBuffer | Uint8Array): string {
     return Array.from(arr)
         .map(b => b.toString(16).padStart(2, '0'))
         .join('');
+}
+
+// Lexicographic comparison of two byte arrays (returns true if a <= b)
+function compareBytesLe(a: Uint8Array, b: Uint8Array): boolean {
+    const len = Math.min(a.length, b.length);
+    for (let i = 0; i < len; i++) {
+        if (a[i] < b[i]) return true;
+        if (a[i] > b[i]) return false;
+    }
+    return a.length <= b.length;
 }
 
 // Curve types
@@ -201,25 +216,79 @@ export class EnclaveClient {
         }
     }
 
-    private async deriveSharedKey(peerPublicKeyDer: string): Promise<CryptoKey> {
+    /**
+     * Get our public key as uncompressed SEC1 bytes.
+     */
+    private async getMyPublicKeySec1(): Promise<Uint8Array> {
+        if (this.curve === 'P-384') {
+            if (!this.p384KeyPair) throw new Error('P-384 keys not initialized');
+            const raw = await crypto.subtle.exportKey('raw', this.p384KeyPair.publicKey);
+            return new Uint8Array(raw); // already uncompressed SEC1 (97 bytes)
+        } else {
+            if (!this.secpPubKey) throw new Error('secp256k1 keys not initialized');
+            return this.secpPubKey; // already uncompressed (65 bytes)
+        }
+    }
+
+    /**
+     * Get our public key as DER-encoded bytes.
+     */
+    private async getMyPublicKeyDer(): Promise<Uint8Array> {
+        if (this.curve === 'P-384') {
+            const raw = await crypto.subtle.exportKey('raw', this.p384KeyPair!.publicKey);
+            return rawToDer(new Uint8Array(raw), 'P-384');
+        } else {
+            return rawToDer(this.secpPubKey!, 'secp256k1');
+        }
+    }
+
+    /**
+     * Perform ECDH and return the raw shared secret.
+     */
+    private async computeSharedSecret(peerPublicKeyDer: string): Promise<ArrayBuffer> {
         const peerKeyBytes = hexToBytes(peerPublicKeyDer);
         const peerRaw = derToRaw(peerKeyBytes, this.curve);
-
-        let sharedSecret: ArrayBuffer;
 
         if (this.curve === 'P-384') {
             if (!this.p384KeyPair) throw new Error('P-384 keys not initialized');
             const peerKey = await crypto.subtle.importKey(
                 'raw', peerRaw as any, { name: 'ECDH', namedCurve: 'P-384' }, true, []
             );
-            sharedSecret = await crypto.subtle.deriveBits(
+            return crypto.subtle.deriveBits(
                 { name: 'ECDH', public: peerKey }, (this.p384KeyPair as any).privateKey, 384
             );
         } else {
             if (!this.secpPrivKey) throw new Error('secp256k1 keys not initialized');
             const fullSecret = secp256k1.getSharedSecret(this.secpPrivKey, peerRaw);
-            sharedSecret = fullSecret.slice(1, 33).buffer; // Use x-coordinate
+            return fullSecret.slice(1, 33).buffer; // Use x-coordinate
         }
+    }
+
+    /**
+     * Derive a per-message AES-256-GCM key using HKDF-SHA256.
+     *
+     * salt = sorted(myPubSec1, peerPubSec1) || nonce
+     * info = "enclaver-ecdh-aes256gcm-v1"
+     */
+    private async deriveMessageKey(
+        sharedSecret: ArrayBuffer,
+        peerPublicKeyDer: string,
+        nonce: Uint8Array
+    ): Promise<CryptoKey> {
+        // Get SEC1 uncompressed public keys for HKDF salt
+        const myPubSec1 = await this.getMyPublicKeySec1();
+        const peerPubSec1 = derToRaw(hexToBytes(peerPublicKeyDer), this.curve);
+
+        // Sort public keys lexicographically
+        const [first, second] = compareBytesLe(myPubSec1, peerPubSec1)
+            ? [myPubSec1, peerPubSec1]
+            : [peerPubSec1, myPubSec1];
+
+        // Build salt = sorted_pubkeys + nonce
+        const salt = new Uint8Array(first.length + second.length + nonce.length);
+        salt.set(first, 0);
+        salt.set(second, first.length);
+        salt.set(nonce, first.length + second.length);
 
         const hkdfKey = await crypto.subtle.importKey(
             'raw', sharedSecret as any, { name: 'HKDF' }, false, ['deriveKey']
@@ -229,8 +298,8 @@ export class EnclaveClient {
             {
                 name: 'HKDF',
                 hash: 'SHA-256',
-                salt: new Uint8Array(0),
-                info: new TextEncoder().encode('encryption data')
+                salt: salt,
+                info: new TextEncoder().encode('enclaver-ecdh-aes256gcm-v1')
             },
             hkdfKey,
             { name: 'AES-GCM', length: 256 },
@@ -243,22 +312,24 @@ export class EnclaveClient {
         if (!this.isConnected) throw new Error('Not connected');
 
         const attestation = await this.fetchAttestation();
-        const aesKey = await this.deriveSharedKey(attestation.public_key);
 
-        const nonce = crypto.getRandomValues(new Uint8Array(32));
+        // 1. ECDH shared secret
+        const sharedSecret = await this.computeSharedSecret(attestation.public_key);
+
+        // 2. Generate 12-byte random nonce
+        const nonce = crypto.getRandomValues(new Uint8Array(12));
+
+        // 3. Derive per-message AES key via HKDF
+        const aesKey = await this.deriveMessageKey(sharedSecret, attestation.public_key, nonce);
+
+        // 4. AES-GCM encrypt
         const ciphertext = await crypto.subtle.encrypt(
-            { name: 'AES-GCM', iv: nonce.slice(0, 12) as any }, // Standard AES-GCM expects 12-byte IV
+            { name: 'AES-GCM', iv: nonce as any },
             aesKey,
             new TextEncoder().encode(plaintext)
         );
 
-        let myPubKeyDer: Uint8Array;
-        if (this.curve === 'P-384') {
-            const raw = await crypto.subtle.exportKey('raw', this.p384KeyPair!.publicKey);
-            myPubKeyDer = rawToDer(new Uint8Array(raw), 'P-384');
-        } else {
-            myPubKeyDer = rawToDer(this.secpPubKey!, 'secp256k1');
-        }
+        const myPubKeyDer = await this.getMyPublicKeyDer();
 
         return {
             nonce: bufferToHex(nonce),
@@ -270,8 +341,11 @@ export class EnclaveClient {
     async decrypt(payload: { nonce: string; public_key: string; encrypted_data: string }): Promise<string> {
         if (!this.isConnected) throw new Error('Not connected');
 
-        const aesKey = await this.deriveSharedKey(payload.public_key);
-        const nonceBytes = hexToBytes(payload.nonce).slice(0, 12);
+        const nonceBytes = hexToBytes(payload.nonce);
+
+        // Derive per-message AES key (using the response nonce)
+        const sharedSecret = await this.computeSharedSecret(payload.public_key);
+        const aesKey = await this.deriveMessageKey(sharedSecret, payload.public_key, nonceBytes);
 
         const plaintext = await crypto.subtle.decrypt(
             { name: 'AES-GCM', iv: nonceBytes as any },

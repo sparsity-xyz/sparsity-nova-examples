@@ -7,8 +7,8 @@ from typing import Optional
 class Chain:
     """Helper for interacting with the blockchain via Helios RPC."""
     
-    DEFAULT_MOCK_RPC = "http://odyn.sparsity.cloud:8545"
-    DEFAULT_HELIOS_RPC = "http://127.0.0.1:8545"
+    DEFAULT_MOCK_RPC = "http://odyn.sparsity.cloud:18545"
+    DEFAULT_HELIOS_RPC = "http://127.0.0.1:18545"
 
     def __init__(self, rpc_url: Optional[str] = None):
         if rpc_url:

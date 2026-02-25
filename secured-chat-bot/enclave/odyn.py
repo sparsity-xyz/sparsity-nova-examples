@@ -162,13 +162,13 @@ class Odyn:
         Returns:
             Decrypted plaintext string
         """
-        # Use only first 12 bytes of nonce for standard AES-GCM compatibility
-        nonce_bytes = bytes.fromhex(nonce_hex)
-        if len(nonce_bytes) > 12:
-            nonce_hex = nonce_bytes[:12].hex()
+        # Normalize 0x prefix on nonce
+        nonce_hex_clean = nonce_hex
+        if nonce_hex_clean.startswith("0x") or nonce_hex_clean.startswith("0X"):
+            nonce_hex_clean = nonce_hex_clean[2:]
             
         payload = {
-            "nonce": nonce_hex if nonce_hex.startswith("0x") else f"0x{nonce_hex}",
+            "nonce": f"0x{nonce_hex_clean}",
             "client_public_key": client_public_key_hex if client_public_key_hex.startswith("0x") else f"0x{client_public_key_hex}",
             "encrypted_data": encrypted_data_hex if encrypted_data_hex.startswith("0x") else f"0x{encrypted_data_hex}"
         }
@@ -261,18 +261,37 @@ if __name__ == '__main__':
         format=serialization.PublicFormat.SubjectPublicKeyInfo
     )
 
-    # 2. Test Decryption: Client encrypts for Odyn
+    # 2. Derive a per-message AES key using the NEW HKDF protocol:
+    #    salt = sorted(client_pub_sec1, server_pub_sec1) + nonce
+    #    info = b"enclaver-ecdh-aes256gcm-v1"
     print("Testing Decryption (Client -> Odyn)...")
     server_public_key = serialization.load_der_public_key(pub_der, backend=default_backend())
     shared_secret = client_private_key.exchange(ec.ECDH(), server_public_key)
-    aes_key = HKDF(
-        algorithm=hashes.SHA256(), length=32, salt=None, info=b"encryption data"
-    ).derive(shared_secret)
-    
+
+    # Get uncompressed SEC1 public keys for HKDF salt
+    client_pub_sec1 = client_private_key.public_key().public_bytes(
+        encoding=serialization.Encoding.X962,
+        format=serialization.PublicFormat.UncompressedPoint
+    )
+    server_pub_sec1 = server_public_key.public_bytes(
+        encoding=serialization.Encoding.X962,
+        format=serialization.PublicFormat.UncompressedPoint
+    )
+
+    def derive_aes_key(shared_secret: bytes, pub_a: bytes, pub_b: bytes, nonce: bytes) -> bytes:
+        """Derive AES-256 key using HKDF with sorted public keys + nonce as salt."""
+        first, second = (pub_a, pub_b) if pub_a <= pub_b else (pub_b, pub_a)
+        salt = first + second + nonce
+        return HKDF(
+            algorithm=hashes.SHA256(), length=32, salt=salt,
+            info=b"enclaver-ecdh-aes256gcm-v1"
+        ).derive(shared_secret)
+
     plaintext = "Secret message from client"
-    nonce = e.get_random_bytes(12) 
+    nonce = e.get_random_bytes(12)
+    aes_key = derive_aes_key(shared_secret, client_pub_sec1, server_pub_sec1, nonce)
     ciphertext = AESGCM(aes_key).encrypt(nonce, plaintext.encode(), None)
-    
+
     decrypted = e.decrypt_data(nonce.hex(), client_public_key_der.hex(), ciphertext.hex())
     print(f"Decrypted by Odyn: {decrypted}")
     assert plaintext == decrypted
@@ -281,11 +300,12 @@ if __name__ == '__main__':
     print("\nTesting Encryption (Odyn -> Client)...")
     response_text = "Hello from the Odyn!"
     enc_data, enc_pub_key, enc_nonce = e.encrypt_data(response_text, client_public_key_der)
-    
-    # Client decrypts using the derived key
-    # IMPORTANT: We use only the first 12 bytes of the nonce for standard AES-GCM
-    client_decrypted = AESGCM(aes_key).decrypt(bytes.fromhex(enc_nonce)[:12], bytes.fromhex(enc_data), None)
+
+    # Client derives the response AES key using the response nonce
+    response_nonce = bytes.fromhex(enc_nonce)
+    response_aes_key = derive_aes_key(shared_secret, client_pub_sec1, server_pub_sec1, response_nonce)
+    client_decrypted = AESGCM(response_aes_key).decrypt(response_nonce, bytes.fromhex(enc_data), None)
     print(f"Decrypted by Client: {client_decrypted.decode()}")
     assert response_text == client_decrypted.decode()
-    
+
     print("\nAll tests passed successfully!")

@@ -164,7 +164,7 @@ class Odyn:
         return res.content
 
     # =========================================================================
-    # Encryption (ECDH + AES-256-GCM)
+    # Encryption (P-384 ECDH + HKDF-SHA256 + AES-256-GCM)
     # =========================================================================
     
     def get_encryption_public_key(self) -> dict:
@@ -212,14 +212,8 @@ class Odyn:
         Returns:
             Decrypted plaintext string
         """
-        # Odyn expects nonce >= 12 bytes; trim if longer
+        # Normalize 0x prefix
         nonce_hex = nonce[2:] if nonce.startswith("0x") else nonce
-        try:
-            nonce_bytes = bytes.fromhex(nonce_hex)
-            if len(nonce_bytes) > 12:
-                nonce_hex = nonce_bytes[:12].hex()
-        except Exception:
-            nonce_hex = nonce_hex[:24]
         nonce = f"0x{nonce_hex}"
         if not nonce.startswith("0x"):
             nonce = f"0x{nonce}"
