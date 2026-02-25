@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { enclaveClient } from '@/lib/crypto';
 
 interface EnclaveConfigProps {
@@ -8,10 +8,16 @@ interface EnclaveConfigProps {
 }
 
 export default function EnclaveConfig({ onConnected }: EnclaveConfigProps) {
-    const [baseUrl, setBaseUrl] = useState('https://108.app.sparsity.cloud');
+    const [baseUrl, setBaseUrl] = useState('');
     const [isConnecting, setIsConnecting] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [enclaveAddress, setEnclaveAddress] = useState<string | null>(null);
+
+    useEffect(() => {
+        if (typeof window !== 'undefined') {
+            setBaseUrl(window.location.origin);
+        }
+    }, []);
 
     const handleConnect = async () => {
         if (!baseUrl.trim()) {
