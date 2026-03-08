@@ -1,55 +1,65 @@
-# Nova Platform Development Guide
+# Sparsity Nova Examples
 
-This guide explains how to develop enclave applications for the Nova Platform.
+This repository contains reference applications for the current Sparsity Nova stack and a practical guide for building enclave applications that match the latest `sparsity-nova-platform` and `enclaver` implementations.
 
-## 1. Enclave Architecture
+The guidance here is aligned with:
 
-On the Nova Platform, user applications run inside an **AWS Nitro Enclave** — an isolated, hardware-secured environment.
+- `sparsity-nova-platform`: control plane, build pipeline, runtime agent, attestation routing, and deployment behavior
+- `enclaver`: build/run tooling, Odyn supervisor, Primary API, Aux API, S3/KMS/app-wallet/Helios integrations
 
-### The Challenge: Nitro Enclave Complexity
+## How Nova Works Today
 
-Deploying applications directly to Nitro Enclaves is notoriously difficult:
+In the current Nova implementation, a production deployment looks like this:
 
-- **No standard networking** — Enclaves have no network interfaces; all communication must go through VSOCK, requiring custom proxy implementations
-- **No persistent storage** — Applications cannot access the host filesystem and must handle all state management carefully
-- **Limited entropy sources** — Standard `/dev/random` doesn't work; you must integrate with the Nitro Secure Module (NSM) for cryptographic randomness
-- **Complex attestation workflow** — Generating and verifying attestation documents requires deep understanding of NSM APIs and CBOR encoding
-- **Custom key management** — Secure key generation and storage inside the enclave requires significant cryptographic engineering
-- **Process supervision challenges** — No systemd or standard init systems; you must build your own process lifecycle management
+1. You provide a normal Dockerized app.
+2. Nova control plane generates `nova-build.yaml` and a deployment-specific `enclaver.yaml`.
+3. Nova App Hub / GitHub Actions builds `Docker -> EIF -> release image`, captures PCRs, and emits a signed `build-attestation.json`.
+4. The runtime agent on EC2 pulls the pre-built image from ECR, verifies the image digest, and starts it with `enclaver run`.
+5. The runtime fetches the enclave attestation from the Aux API, configures Caddy, and exposes:
+   - your application on the deployment URL
+   - `POST /.well-known/attestation` on the same hostname
+6. ZK proof generation and on-chain registration happen after the enclave is running.
 
-These challenges make enclave development inaccessible to most developers and significantly slow down time-to-production.
+The examples in this repo are written for that flow: keep the application code simple and let Enclaver/Odyn provide enclave-native services.
 
-### The Solution: Odyn
+## Current Runtime Model
 
-**Odyn** is the enclave supervisor that runs alongside your application, abstracting away all enclave complexity. You write a normal web application; Odyn handles the rest.
+Enclaver builds a release image that contains:
 
-**What Odyn Does For You:**
+- your app image, amended with `/sbin/odyn` and `/etc/enclaver/enclaver.yaml`
+- the generated `application.eif`
+- the Sleeve runtime image that launches Nitro Enclaves with `nitro-cli`
 
-| Challenge | Odyn Solution |
-|-----------|---------------|
-| No networking | Provides HTTP ingress/egress proxies over VSOCK |
-| No entropy | Seeds RNG from NSM automatically |
-| Complex attestation | Simple REST API: `POST /v1/attestation` |
-| Key management | Built-in Ethereum wallet with signing APIs |
-| Process supervision | Launches, monitors, and restarts your app |
-| Logging | Captures stdout/stderr and exposes via VSOCK |
+At runtime:
 
-### Services Provided to Your Application
+- `enclaver-run` starts the enclave on the host side
+- `odyn` runs as PID 1 inside the enclave
+- your application runs under Odyn supervision
+- outbound traffic goes through Odyn's egress proxy
+- attestation, signing, encryption, storage, and optional KMS/app-wallet features are exposed through Odyn's API surface
 
-- Secure key management and Ethereum signing
-- Cryptographic random number generation (from NSM)
-- Hardware-level remote attestation
-- End-to-end encryption (ECDH + AES-256-GCM)
-- **S3 Storage**: Persistent, isolated storage for application state
-- **Helios RPC**: Trustless Ethereum/OP Stack light client for verified blockchain access
+### Network Surfaces
 
-## 2. Application Packaging and Deployment
+| Surface | Inside Enclave | Public in Normal Nova Deployments | Notes |
+|---------|----------------|-----------------------------------|-------|
+| App ingress | app-defined port (for example `8000`) | Yes | Published by runtime and routed by Caddy |
+| Primary API | `127.0.0.1:18000` | No | Full `/v1/*` API; loopback-only in normal deployments |
+| Aux API | `127.0.0.1:18001` | Indirectly | Runtime maps a host attestation port to `18001` and routes `/.well-known/attestation*` there |
+| Helios RPC | `127.0.0.1:18545+` | No | Public only in Nova's special mockup service |
 
-Your application needs to be packaged as a **Docker image**. During development, you can follow standard practices:
+Important current behavior from `sparsity-nova-platform`:
 
-- Use any programming language and framework
-- Use network functionality normally (HTTP requests, database connections, etc.)
-- Remember your application's listening port (needed for configuration)
+- the runtime publishes exactly two ports for normal apps:
+  - host app port -> enclave app port
+  - host attestation port -> enclave Aux API port `18001`
+- `/.well-known/attestation*` is routed by Caddy to that host attestation port
+- the Primary API (`18000`) is not exposed publicly for normal production apps
+
+## What You Build
+
+### 1. A Normal Docker Image
+
+Your application can use any language or framework as long as it runs in a container and listens on a known port.
 
 ```dockerfile
 FROM python:3.11-slim
@@ -58,196 +68,232 @@ WORKDIR /app
 COPY . .
 RUN pip install -r requirements.txt
 
-# Remember your application's listening port
-EXPOSE 8080
-CMD ["python", "main.py"]
+# This is an app-level convention, not something Enclaver injects automatically.
+ENV IN_ENCLAVE=false
+
+EXPOSE 8000
+CMD ["python", "app.py"]
 ```
 
-## 3. Odyn API Service
+### 2. An `enclaver.yaml`
 
-Inside the enclave, access Odyn's API service to use Nitro Enclave security features:
+For Nova deployments, the control plane generates the authoritative manifest from app settings. The committed example manifests in this repo are useful for local runs, but Nova production behavior is defined by the generated manifest.
 
-| Environment              | Base URL                           |
-|--------------------------|------------------------------------|
-| Production (in enclave)  | `http://localhost:18000`           |
-| Development (mock)       | `http://odyn.sparsity.cloud:18000` |
+A typical Nova-generated manifest looks like this:
 
-### API Reference
+```yaml
+version: v1
+name: my-app
+target: nova-apps/my-app:v1
 
-**Core APIs:**
+sources:
+  app: my-app:v1
 
-| Endpoint                  | Method | Description                                  |
-|---------------------------|--------|----------------------------------------------|
-| `/v1/eth/address`         | GET    | Get enclave's Ethereum address and public key |
-| `/v1/eth/sign`            | POST   | Sign a message (EIP-191) with optional attestation |
-| `/v1/eth/sign-tx`         | POST   | Sign an Ethereum transaction                 |
-| `/v1/random`              | GET    | Get 32 cryptographically secure random bytes |
-| `/v1/attestation`         | POST   | Generate a hardware attestation document     |
-| `/v1/encryption/public_key` | GET  | Get enclave's encryption public key          |
-| `/v1/encryption/encrypt`  | POST   | Encrypt data with client's public key        |
-| `/v1/encryption/decrypt`  | POST   | Decrypt data sent to the enclave             |
+defaults:
+  cpu_count: 2
+  memory_mb: 4096
 
-**S3 Storage APIs:**
+ingress:
+  - listen_port: 8000
+  - listen_port: 18001
 
-| Endpoint       | Method | Description                                 |
-|----------------|--------|---------------------------------------------|
-| `/v1/s3/get`   | POST   | Retrieve a base64-encoded object from S3    |
-| `/v1/s3/put`   | POST   | Upload a base64-encoded object to S3        |
-| `/v1/s3/delete`| POST   | Delete an object from S3                    |
-| `/v1/s3/list`  | POST   | List objects with optional prefix filtering |
+egress:
+  allow:
+    - api.openai.com
+    - "**.amazonaws.com"
+    - 169.254.169.254
 
-> 📖 For complete API documentation with request/response examples, see: [Enclaver Internal API](https://github.com/sparsity-xyz/enclaver/blob/sparsity/docs/internal_api.md)
+api:
+  listen_port: 18000
 
-### Environment Configuration
+aux_api:
+  listen_port: 18001
 
-Use the `IN_ENCLAVE` environment variable to switch between development and production:
+storage:
+  s3:
+    enabled: true
+    bucket: my-app-storage
+    prefix: apps/my-app/
+    region: us-west-1
+
+kms_integration:
+  enabled: true
+  use_app_wallet: true
+  kms_app_id: 49
+  nova_app_registry: "0x..."
+
+helios_rpc:
+  enabled: true
+  chains:
+    - name: L2-base-sepolia
+      network_id: "84532"
+      kind: opstack
+      network: base-sepolia
+      execution_rpc: https://sepolia.base.org
+      local_rpc_port: 18545
+```
+
+Key points:
+
+- `api.listen_port` enables the full internal API on `127.0.0.1:18000`
+- `aux_api.listen_port` enables the restricted attestation surface on `127.0.0.1:18001`
+- Nova normally adds the app port and `18001` to `ingress`
+- S3, KMS, app-wallet, and Helios are optional and manifest-driven
+- if you use AWS SDK flows that rely on IMDS, allow `169.254.169.254` in `egress`
+
+### 3. A `nova-build.yaml`
+
+Nova also generates `nova-build.yaml` when a build is triggered:
+
+```yaml
+name: "my-app"
+version: "v1"
+repo: "https://github.com/you/my-app"
+ref: "main"
+build:
+  directory: "enclave"
+  dockerfile: "Dockerfile"
+metadata:
+  description: "My enclave application"
+```
+
+This config drives the build pipeline that produces the release image and build provenance.
+
+## Current Odyn API Surface
+
+Inside the enclave, Odyn exposes localhost-only HTTP APIs. The full API lives on the Primary API port; the public attestation path used by Nova is backed by the Aux API.
+
+### Core Endpoints
+
+| Endpoint | Method | Current Behavior |
+|----------|--------|------------------|
+| `/v1/eth/address` | `GET` | Returns enclave Ethereum address and public key |
+| `/v1/eth/sign` | `POST` | EIP-191 personal-sign; can optionally include attestation |
+| `/v1/eth/sign-tx` | `POST` | Signs EIP-1559 transactions |
+| `/v1/random` | `GET` | Returns 32 bytes from NSM-backed randomness |
+| `/v1/attestation` | `POST` | Returns raw CBOR attestation bytes; not JSON |
+| `/v1/encryption/public_key` | `GET` | Returns the enclave P-384 public key |
+| `/v1/encryption/encrypt` | `POST` | Encrypts a response to a client |
+| `/v1/encryption/decrypt` | `POST` | Decrypts client payloads |
+
+### Optional Storage / KMS Endpoints
+
+| Endpoint Group | Availability | Notes |
+|----------------|--------------|-------|
+| `/v1/s3/*` | `storage.s3.enabled=true` | Base64 object storage API backed by S3 |
+| `/v1/kms/*` | `kms_integration.enabled=true` | Registry-backed key derivation and KV APIs |
+| `/v1/app-wallet/*` | `kms_integration.use_app_wallet=true` | App-wallet identity and signing APIs |
+
+### Attestation Rules That Matter
+
+- `POST /v1/attestation` returns raw CBOR bytes with content type `application/cbor`
+- `nonce` is optional
+- `public_key` is optional; if omitted, Odyn uses the enclave encryption public key
+- `user_data` must be a JSON object when provided
+- Odyn injects `eth_addr` into `user_data`
+- if app-wallet material is available, Odyn also injects `app_wallet`
+
+## Public Attestation vs Internal Attestation
+
+This distinction matters because older docs in this repo blurred the two:
+
+- inside the enclave, your app can call `POST http://127.0.0.1:18000/v1/attestation`
+- outside the enclave, Nova exposes `POST /.well-known/attestation`
+- in current Nova runtime, `/.well-known/attestation` is not your app's responsibility in production; Caddy routes it to the Aux API port that the runtime published
+
+Some examples in this repo still implement `/.well-known/attestation` in app code for local development convenience. Treat that as a dev shim, not as the production Nova routing model.
+
+## Outbound Networking: Current Constraint
+
+Nitro Enclaves do not have direct outbound network access. In the current Enclaver implementation:
+
+- Odyn provides an HTTP(S) egress proxy inside the enclave
+- Odyn sets `http_proxy`, `https_proxy`, `HTTP_PROXY`, `HTTPS_PROXY`, `no_proxy`, and `NO_PROXY` for your app when egress is enabled
+- your HTTP client library must respect proxy settings, or you must configure a proxy explicitly
+
+Do not assume that "normal networking" always works unchanged inside the enclave. This is a common failure mode, especially with libraries that ignore proxy environment variables by default.
+
+## Local Development
+
+The examples in this repo commonly use an app-level `IN_ENCLAVE` convention:
 
 ```python
 import os
 
 IN_ENCLAVE = os.getenv("IN_ENCLAVE", "false").lower() == "true"
-
-if IN_ENCLAVE:
-    ODYN_BASE_URL = "http://localhost:18000"
-else:
-    ODYN_BASE_URL = "http://odyn.sparsity.cloud:18000"
+ODYN_BASE_URL = "http://127.0.0.1:18000" if IN_ENCLAVE else "http://odyn.sparsity.cloud:18000"
 ```
 
-Set in your Dockerfile:
+Important caveats from the current Enclaver docs:
 
-```dockerfile
-ENV IN_ENCLAVE=false  # Set to true in production
-```
+- `IN_ENCLAVE` is not injected automatically by Enclaver
+- the external mock service is a convenience endpoint, not the authoritative implementation
+- you should verify important behavior against the real Enclaver code or a real enclave deployment
 
-## 4. Reference Implementation
+### Current Mock Endpoints Used by Examples
 
-Refer to the Odyn wrapper implementation in the `echo-vault` example project, which is the latest and most comprehensive reference:
+Nova currently operates a special mockup service that backs `odyn.sparsity.cloud`. It is useful for lightweight development loops and exposes:
 
-📁 [`echo-vault/enclave/odyn.py`](./echo-vault/enclave/odyn.py)
+- Primary API: `http://odyn.sparsity.cloud:18000`
+- Aux API: `http://odyn.sparsity.cloud:18001`
+- Helios RPC presets: `http://odyn.sparsity.cloud:18545` through `:18553`
 
-This implementation demonstrates:
-- Automatic environment detection and endpoint switching
-- Complete API method wrappers
-- Encryption/decryption usage examples
-- Message signing functionality
+Treat this as a development convenience. It is not version-locked to the Enclaver repo.
 
-```python
-from odyn import Odyn
+## Build Provenance in the Current Platform
 
-# Automatically selects endpoint based on environment
-odyn = Odyn()
+Nova's current build pipeline records provenance in `build-attestation.json`, including:
 
-# Get Ethereum address
-address = odyn.eth_address()
+- source repository, ref, commit, directory, and Dockerfile
+- PCR0 / PCR1 / PCR2 from the built EIF
+- build timestamp and GitHub run metadata
 
-# Sign a message
-signature = odyn.sign_message({"data": "hello"})
+The build attestation is signed with Sigstore/cosign, stored off-chain, and referenced by hash/URL in the platform flow. Runtime then deploys the pre-built image and verifies its digest before launch.
 
-# Get random bytes
-random_bytes = odyn.get_random_bytes(16)
+## Reference Implementations in This Repo
 
-# Get attestation document
-attestation = odyn.get_attestation()
-```
+| Example | Why It Matters |
+|---------|----------------|
+| [hello-world-tee](./hello-world-tee) | Smallest identity + attestation example |
+| [echo-vault](./echo-vault) | Best end-to-end backend reference; uses S3 persistence and Helios RPC |
+| [secured-chat-bot](./secured-chat-bot) | Best reference for browser-to-enclave encryption with P-384 ECDH |
+| [oracles/rng-oracle](./oracles/rng-oracle) | On-chain randomness flow with enclave signing |
+| [oracles/price-oracle](./oracles/price-oracle) | External API verification and signing patterns |
 
-## 5. Frontend Deployment
+For the most complete Python helper wrapper in this repo, start with:
 
-Enclave applications typically run as API services. There are two approaches for frontend deployment:
-
-### Option 1: Separate Frontend Deployment
-
-Deploy frontend code separately on an external server or CDN, communicating with the enclave service via API.
-
-> ⚠️ **CORS Configuration Required**: When your frontend is hosted on a different domain than your enclave API, you must configure CORS (Cross-Origin Resource Sharing) on your backend to allow cross-origin requests. Otherwise, browsers will block API requests from your frontend.
-
-**FastAPI CORS Example:**
-```python
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-
-app = FastAPI()
-
-# Configure CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["https://your-frontend-domain.com"],  # Or ["*"] for development
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-```
-
-### Option 2: Enclave-Embedded Frontend
-
-Provide a static file serving endpoint within your enclave application, such as `/frontend`, to serve compiled frontend code:
-
-```python
-from fastapi import FastAPI
-from fastapi.staticfiles import StaticFiles
-
-app = FastAPI()
-
-# Mount static frontend files
-app.mount("/frontend", StaticFiles(directory="frontend_dist", html=True), name="frontend")
-
-# API routes
-@app.get("/api/status")
-def get_status():
-    return {"status": "running"}
-```
-
-This approach allows users to access the complete application interface directly.
-
----
+- [`echo-vault/enclave/odyn.py`](./echo-vault/enclave/odyn.py)
 
 ## Quick Start
 
-1. **Create Application Directory Structure**
-   ```
-   my-enclave-app/
-   ├── enclave/
-   │   ├── main.py
-   │   ├── odyn.py      # Copy from echo-vault/enclave/odyn.py
-   │   ├── requirements.txt
-   │   └── Dockerfile
-   └── frontend/        # Optional
-       └── ...
-   ```
+### Run an Example Locally
 
-2. **Copy Odyn Helper**
-   ```bash
-   cp echo-vault/enclave/odyn.py my-enclave-app/enclave/
-   ```
+```bash
+cd echo-vault/enclave
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+IN_ENCLAVE=false python -m uvicorn app:app --host 0.0.0.0 --port 8000
+```
 
-3. **Use Odyn Service**
-   ```python
-   from odyn import Odyn
-   
-   odyn = Odyn()
-   # Now you can use all enclave features
-   ```
+For frontend-backed examples, start the frontend separately if the example README says so.
 
-4. **Local Testing**
-   ```bash
-   IN_ENCLAVE=false python main.py
-   ```
+### Deploy Through Nova
 
-5. **Build Docker Image and Deploy to Nova Platform**
+The current production path is:
 
----
+1. push your app repo with a normal Dockerfile
+2. create the app in Nova Portal
+3. configure advanced settings that determine generated `nova-build.yaml` and `enclaver.yaml`
+4. trigger a build
+5. enroll the resulting version if on-chain registration is enabled
+6. deploy the enrolled version
+7. verify the app URL and `POST /.well-known/attestation`
 
-## More Examples
+## Related Reading
 
-| Example Project | Description |
-|-----------------|-------------|
-| [echo-vault](./echo-vault) | **Latest Reference**: Secure vault demonstrating **S3 Storage** persistence and **Helios RPC** (light client) integration |
-| [secured-chat-bot](./secured-chat-bot) | Secure chatbot demonstrating end-to-end encryption |
-| [rng-oracle](./oracles/rng-oracle) | RNG Oracle for verifiable on-chain random numbers |
-| [price-oracle](./oracles/price-oracle) | Price oracle demonstrating API signature verification |
-
----
-
-## Related Links
-
-- [Enclaver Internal API Documentation](https://github.com/sparsity-xyz/enclaver/blob/sparsity/docs/internal_api.md)
-- [Nova Platform](https://sparsity.cloud)
+- [Enclaver Internal API](https://github.com/sparsity-xyz/enclaver/blob/sparsity/docs/internal_api.md)
+- [Enclaver Manifest Reference](https://github.com/sparsity-xyz/enclaver/blob/sparsity/docs/enclaver.yaml)
+- [Enclaver Architecture](https://github.com/sparsity-xyz/enclaver/blob/sparsity/docs/enclaver-architecture.md)
+- [Nova Build Attestation](https://github.com/sparsity-xyz/sparsity-nova-platform/blob/main/docs/build-attestation.md)
+- [Nova Runtime Port Exposure Flow](https://github.com/sparsity-xyz/sparsity-nova-platform/blob/main/docs/runtime-port-exposure-flow.md)
