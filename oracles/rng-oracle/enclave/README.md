@@ -14,7 +14,7 @@ This service runs inside an AWS Nitro Enclave and:
 | File | Description |
 |------|-------------|
 | `main.py` | FastAPI application and event listener |
-| `odyn.py` | Odyn API wrapper (attestation, signing, random, encryption) |
+| `nova_python_sdk/` | Vendored canonical Nova SDK (Odyn, env helpers, RPC utilities) |
 | `config.py` | Configuration settings |
 | `abi.json` | RNG contract ABI |
 | `requirements.txt` | Python dependencies |
@@ -38,7 +38,7 @@ RPC_URL = "https://sepolia.base.org"  # RPC endpoint
 ```
 
 The Odyn API endpoint is automatically detected:
-- In enclave (when `IN_ENCLAVE=True`): `http://localhost:18000`
+- In enclave (when `IN_ENCLAVE=True`): `http://127.0.0.1:18000`
 - Local development: `http://odyn.sparsity.cloud:18000` (mock API)
 
 ### Run

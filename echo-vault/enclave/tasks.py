@@ -3,7 +3,7 @@ import logging
 import threading
 import time
 from typing import List, Dict, Any, Optional
-from odyn import Odyn
+from nova_python_sdk.odyn import Odyn
 from chain import Chain
 
 logger = logging.getLogger(__name__)

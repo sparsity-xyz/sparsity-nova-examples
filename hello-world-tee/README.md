@@ -33,6 +33,6 @@ docker run --rm -p 8000:8000 -e IN_ENCLAVE=false hello-world-tee
 
 ## Notes
 
-- `IN_ENCLAVE=true` uses `http://localhost:18000` (inside enclave)
+- `IN_ENCLAVE=true` uses `http://127.0.0.1:18000` (inside enclave)
 - `IN_ENCLAVE=false` uses `http://odyn.sparsity.cloud:18000` (mock service)
-- `odyn.py` is reused from the `echo-vault` example
+- The backend vendors the canonical SDK under `enclave/nova_python_sdk/`

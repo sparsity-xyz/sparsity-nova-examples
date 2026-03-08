@@ -19,7 +19,7 @@ from typing import Dict, Any, Optional
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 
-from odyn import Odyn
+from nova_python_sdk.odyn import Odyn
 from ai_models.open_ai import OpenAI
 from ai_models.platform import Platform
 
@@ -45,6 +45,35 @@ PLATFORM_MAPPING: Dict[str, type] = {
 # SECURITY: Never expose this value in any response
 _cached_api_key: Optional[str] = None
 _cached_platform: Optional[str] = None
+
+
+def _strip_0x(value: str) -> str:
+    return value[2:] if isinstance(value, str) and value.startswith("0x") else value
+
+
+def _decrypt_request_payload(nonce_hex: str, client_public_key_hex: str, encrypted_data_hex: str) -> Dict[str, Any]:
+    decrypted_str = odyn.decrypt(nonce_hex, client_public_key_hex, encrypted_data_hex)
+    return json.loads(decrypted_str)
+
+
+def _encrypt_response_envelope(response_data: Dict[str, Any], client_public_key_hex: str) -> Dict[str, str]:
+    response_json = json.dumps(response_data, sort_keys=True, separators=(',', ':'))
+    encrypted = odyn.encrypt(response_json, client_public_key_hex)
+    return {
+        "nonce": _strip_0x(encrypted["nonce"]),
+        "public_key": _strip_0x(encrypted["enclave_public_key"]),
+        "encrypted_data": _strip_0x(encrypted["encrypted_data"]),
+    }
+
+
+def _sign_envelope(encrypted_envelope: Dict[str, str]) -> str:
+    message = json.dumps(encrypted_envelope, sort_keys=True, separators=(',', ':'))
+    try:
+        signed = odyn.sign_message(message)
+    except Exception as exc:
+        logger.warning("Envelope signing failed: %s", exc)
+        return ""
+    return _strip_0x(signed.get("signature", ""))
 
 
 @app.route('/')
@@ -102,9 +131,9 @@ def serve_frontend(path=''):
     return send_from_directory(FRONTEND_DIR, 'index.html')
 
 
-# Only register /.well-known/attestation in local dev mode (not in Docker)
-# In Docker, the enclaver runtime provides this endpoint
-if os.getenv("IN_DOCKER", "False").lower() != "true":
+# Only register /.well-known/attestation in local dev mode.
+# In enclave deployments, the runtime provides this endpoint.
+if os.getenv("IN_ENCLAVE", "false").lower() != "true":
     @app.route('/.well-known/attestation', methods=['POST'])
     def attestation():
         """
@@ -148,8 +177,7 @@ def set_api_key():
         
         # Decrypt the request
         try:
-            decrypted_str = odyn.decrypt_data(nonce_hex, client_public_key_hex, encrypted_data_hex)
-            data = json.loads(decrypted_str)
+            data = _decrypt_request_payload(nonce_hex, client_public_key_hex, encrypted_data_hex)
         except Exception as e:
             logger.error(f"Decryption failed: {e}")
             return jsonify({"error": f"Decryption failed: {str(e)}"}), 400
@@ -168,7 +196,6 @@ def set_api_key():
         _cached_platform = platform
         
         # Build encrypted response
-        client_public_key_der = bytes.fromhex(client_public_key_hex)
         response_data = {
             "status": "success",
             "message": "API key cached successfully",
@@ -176,17 +203,8 @@ def set_api_key():
             "timestamp": int(time.time())
         }
         
-        response_json = json.dumps(response_data, sort_keys=True, separators=(',', ':'))
-        encrypted_response, server_public_key_hex, response_nonce_hex = odyn.encrypt_data(
-            response_json, client_public_key_der
-        )
-        
-        encrypted_envelope = {
-            "nonce": response_nonce_hex,
-            "public_key": server_public_key_hex,
-            "encrypted_data": encrypted_response
-        }
-        return jsonify({"sig": odyn.sign_message(encrypted_envelope), "data": encrypted_envelope})
+        encrypted_envelope = _encrypt_response_envelope(response_data, client_public_key_hex)
+        return jsonify({"sig": _sign_envelope(encrypted_envelope), "data": encrypted_envelope})
         
     except Exception as e:
         logger.error(f"Set API key error: {e}")
@@ -209,13 +227,10 @@ def talk():
         
         # Decrypt the request
         try:
-            decrypted_str = odyn.decrypt_data(nonce_hex, client_public_key_hex, encrypted_data_hex)
-            data = json.loads(decrypted_str)
+            data = _decrypt_request_payload(nonce_hex, client_public_key_hex, encrypted_data_hex)
         except Exception as e:
             logger.error(f"Decryption failed: {e}")
             return jsonify({"error": f"Decryption failed: {str(e)}"}), 400
-        
-        client_public_key_der = bytes.fromhex(client_public_key_hex)
         message = data.get("message", "")
         ai_model = data.get("ai_model", "gpt-4")
         
@@ -260,52 +275,8 @@ def talk():
         }
         
         # Encrypt the response
-        response_json = json.dumps(response_data, sort_keys=True, separators=(',', ':'))
-        encrypted_response, server_public_key_hex, response_nonce_hex = odyn.encrypt_data(
-            response_json, client_public_key_der
-        )
-        
-        encrypted_envelope = {
-            "nonce": response_nonce_hex,
-            "public_key": server_public_key_hex,
-            "encrypted_data": encrypted_response
-        }
-        return jsonify({"sig": odyn.sign_message(encrypted_envelope), "data": encrypted_envelope})
-        
-    except Exception as e:
-        logger.error(f"Talk error: {e}")
-        return jsonify({"error": str(e)}), 500
-        
-        # Build response data
-        response_data = {
-            "platform": platform,
-            "ai_model": ai_model,
-            "timestamp": resp_timestamp,
-            "message": message,
-            "response": resp_content
-        }
-        
-        # Encrypt the response
-        logger.info("Encrypting response...")
-        response_json = json.dumps(response_data, sort_keys=True, separators=(',', ':'))
-        encrypted_response, server_public_key_hex, response_nonce_hex = odyn.encrypt_data(
-            response_json, client_public_key_der
-        )
-        
-        # Build encrypted response envelope
-        encrypted_envelope = {
-            "nonce": response_nonce_hex,
-            "public_key": server_public_key_hex,
-            "encrypted_data": encrypted_response
-        }
-        
-        # Sign the encrypted envelope
-        signature = odyn.sign_message(encrypted_envelope)
-        
-        return jsonify({
-            "sig": signature,
-            "data": encrypted_envelope
-        })
+        encrypted_envelope = _encrypt_response_envelope(response_data, client_public_key_hex)
+        return jsonify({"sig": _sign_envelope(encrypted_envelope), "data": encrypted_envelope})
         
     except Exception as e:
         logger.error(f"Talk error: {e}")

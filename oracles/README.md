@@ -46,7 +46,7 @@ Create a Python/Node.js service that:
 
 ```python
 # Typical oracle service pattern
-from odyn import Odyn
+from nova_python_sdk.odyn import Odyn
 from web3 import Web3
 
 odyn = Odyn()  # Handles TEE features automatically
@@ -63,14 +63,14 @@ def handle_request(event):
     data = fetch_from_external_api(event.args.params)
     
     # 4. Sign and submit fulfillment transaction
-    tx = contract.functions.fulfill(event.args.requestId, data)
-    signed_tx = odyn.sign_transaction(tx)
-    w3.eth.send_raw_transaction(signed_tx)
+    tx = contract.functions.fulfill(event.args.requestId, data).build_transaction(...)
+    signed = odyn.sign_tx(tx)
+    w3.eth.send_raw_transaction(signed["raw_transaction"])
 ```
 
 **Key Files:**
 - `main.py` / `app.py` — Service entry point
-- `odyn.py` — Copy from examples, handles Odyn API
+- `nova_python_sdk/` — Vendor the canonical SDK from `nova-app-template`
 - `config.py` — Contract address, RPC URL
 - `Dockerfile` — Container build
 - `requirements.txt` — Dependencies

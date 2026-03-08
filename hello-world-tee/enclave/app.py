@@ -7,7 +7,7 @@ import uvicorn
 from fastapi import FastAPI, Response
 from fastapi.responses import HTMLResponse, JSONResponse
 
-from odyn import Odyn
+from nova_python_sdk.odyn import Odyn
 
 
 logging.basicConfig(

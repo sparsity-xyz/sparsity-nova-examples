@@ -2,7 +2,6 @@ import os
 import asyncio
 import logging
 import random
-import requests
 from typing import List, Optional
 
 import uvicorn
@@ -13,7 +12,7 @@ from fastapi.requests import Request
 from fastapi.staticfiles import StaticFiles
 
 from config import Config
-from odyn import Odyn
+from nova_python_sdk.odyn import Odyn
 
 
 logging.basicConfig(
@@ -152,7 +151,7 @@ class RandomNumberGenerator:
 
     def sign_tx(self, transaction_dict: dict) -> str:
         """
-        Sign transaction using enclaver's /v1/eth/sign-tx endpoint.
+        Sign transaction using the canonical Nova Odyn SDK.
         
         Args:
             transaction_dict: Transaction dictionary with web3.py format
@@ -160,16 +159,8 @@ class RandomNumberGenerator:
         Returns:
             Signed raw transaction hex string
         """
-        res = requests.post(
-            f"{self.enclaver.endpoint}/v1/eth/sign-tx",
-            json={
-                "payload": self.tx_to_payload(transaction_dict),
-                "include_attestation": False
-            },
-            timeout=10
-        )
-        res.raise_for_status()
-        return res.json()["raw_transaction"]
+        result = self.enclaver.sign_tx(self.tx_to_payload(transaction_dict))
+        return result["raw_transaction"]
 
     def generate_random_numbers(self, min_val: int, max_val: int, count: int) -> List[int]:
         """
@@ -184,7 +175,7 @@ class RandomNumberGenerator:
             List of random numbers
         """
         # Get random seed from enclave
-        seed = self.enclaver.get_random_bytes(32)
+        seed = self.enclaver.get_random_bytes()
         random.seed(seed)
         
         random_numbers = []

@@ -81,7 +81,7 @@ The project root contains the build configuration and documentation, while the `
 secured-chat-bot/
 ├── enclave/           # Python Flask backend
 │   ├── app.py         # Main service
-│   ├── odyn.py        # Odyn API wrapper
+│   ├── nova_python_sdk/ # Vendored canonical Nova SDK
 │   └── ai_models/     # AI integrations
 ├── frontend/          # Next.js frontend source
 ├── Dockerfile         # Multi-stage build
@@ -91,16 +91,18 @@ secured-chat-bot/
 └── tutorial.md        # This guide
 ```
 
-### 2.2 Odyn Wrapper
+### 2.2 Nova Python SDK
 
-The Odyn wrapper provides a simple interface to the enclave's TEE services:
+The vendored `nova_python_sdk` provides the shared interface to enclave TEE services:
 
 - **`eth_address()`**: Get the TEE's unique Ethereum address for signing
-- **`encrypt_data()` / `decrypt_data()`**: TEE-managed ECDH encryption/decryption
+- **`encrypt()` / `decrypt()`**: TEE-managed ECDH encryption/decryption
 - **`sign_message()`**: Sign responses for verifiability
 - **`get_attestation()`**: Fetch the AWS Nitro attestation document
 
-📄 **Source**: [enclave/odyn.py](enclave/odyn.py)
+The app keeps its response-envelope formatting in `app.py`, while the shared runtime calls come from `enclave/nova_python_sdk/`.
+
+📄 **Source**: [enclave/nova_python_sdk/odyn.py](enclave/nova_python_sdk/odyn.py)
 
 ### 2.3 Main Application (Flask)
 
@@ -122,7 +124,7 @@ python app.py
 ```
 
 > [!TIP]
-> When running locally, the service uses a mock Odyn API at `odyn.sparsity.cloud:18000`. In production, it connects to the real TEE hardware on `localhost:18000`.
+> When running locally, the service uses a mock Odyn API at `odyn.sparsity.cloud:18000`. In production, it connects to the enclave-local Odyn endpoint at `127.0.0.1:18000`.
 
 ## 3. Develop Frontend Application
 

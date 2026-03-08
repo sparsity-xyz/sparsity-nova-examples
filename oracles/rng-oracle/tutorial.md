@@ -205,7 +205,7 @@ REGISTRY_ADDRESS=0x... npx hardhat run scripts/set-registry.js --network baseSep
 ```
 enclave/
 ├── main.py           # FastAPI service entry point
-├── odyn.py           # Odyn API wrapper (enclave services)
+├── nova_python_sdk/  # Vendored canonical Nova SDK
 ├── config.py         # Configuration
 ├── abi.json          # Contract ABI
 ├── requirements.txt  # Python dependencies
@@ -218,20 +218,20 @@ The config file contains contract address, RPC endpoint, and ABI loading.
 
 📄 **Source**: [enclave/config.py](enclave/config.py)
 
-### 4.3 Odyn Wrapper
+### 4.3 Nova Python SDK
 
-The Odyn wrapper provides an interface to the enclave's TEE services:
+The vendored `nova_python_sdk` provides an interface to the enclave's TEE services:
 
 - **`eth_address()`**: Get the TEE wallet address
 - **`get_random_bytes()`**: Fetch hardware random from AWS Nitro's NSM
-- **`sign_message()`** / **`sign_data()`**: Sign messages using TEE private key
-- **`encrypt_data()`** / **`decrypt_data()`**: ECDH-based encryption
+- **`sign_tx()`** / **`sign_message()`**: Sign using the enclave-held private key
+- **`encrypt()`** / **`decrypt()`**: ECDH-based encryption
 
 **Key Points:**
-- In enclave (`IN_ENCLAVE=True`): Uses `localhost:18000` (real Odyn)
+- In enclave (`IN_ENCLAVE=True`): Uses `127.0.0.1:18000` (real Odyn)
 - In development: Uses mock API at `odyn.sparsity.cloud:18000`
 
-📄 **Source**: [enclave/odyn.py](enclave/odyn.py)
+📄 **Source**: [enclave/nova_python_sdk/odyn.py](enclave/nova_python_sdk/odyn.py)
 
 ### 4.4 Main Application
 

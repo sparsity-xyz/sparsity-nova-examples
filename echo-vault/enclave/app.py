@@ -2,7 +2,7 @@ import logging
 import uvicorn
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
-from odyn import Odyn
+from nova_python_sdk.odyn import Odyn
 from chain import Chain
 from tasks import EchoTask
 import os

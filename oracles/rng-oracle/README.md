@@ -54,7 +54,7 @@ rng-oracle/
 │   └── scripts/       # Deployment scripts
 ├── enclave/           # Python TEE service
 │   ├── main.py        # FastAPI + event listener
-│   └── odyn.py        # TEE API wrapper
+│   └── nova_python_sdk/ # Vendored canonical Nova SDK
 └── consumer/          # React frontend (Vite)
 ```
 

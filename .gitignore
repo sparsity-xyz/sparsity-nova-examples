@@ -1,20 +1,32 @@
-random-number-generator/enclave/.venv
-random-number-generator/enclave/__pycache__
-secured-chat-bot/enclave/.venv
-secured-chat-bot/enclave/__pycache__
-secured-chat-bot/enclave/ai_models/__pycache__
-secured-chat-bot/frontend/node_modules
-secured-chat-bot/frontend/.next
-secured-chat-bot/frontend/out
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+env/
+
+# JavaScript / frontend
+node_modules/
+.next/
+out/
+dist/
+dist-ssr/
+
+# Generated enclave frontend bundles
+echo-vault/enclave/frontend/
+secured-chat-bot/enclave/frontend/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# IDE / OS
 .vscode/
-random-number-generator-frontend/node_modules
-random-number-generator-frontend/dist
-
-nova-app-template/enclave/.venv
-nova-app-template/enclave/__pycache__
-nova-app-template/frontend/.next
-nova-app-template/frontend/node_modules
-nova-app-template/frontend/out
-
-
-
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo

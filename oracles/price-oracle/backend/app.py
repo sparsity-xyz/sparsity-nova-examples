@@ -4,7 +4,6 @@ BTC Price Oracle - Fetches BTC price from CoinGecko and updates on-chain.
 """
 
 import json
-import os
 import time
 import threading
 import logging
@@ -13,6 +12,7 @@ from flask import Flask, jsonify
 from eth_utils import to_checksum_address
 from rlp import encode as rlp_encode
 from web3 import Web3
+from nova_python_sdk.odyn import Odyn
 
 # Configure logging
 logging.basicConfig(
@@ -22,9 +22,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
-
-# Enclaver odyn API endpoint (internal)
-ODYN_API = "http://localhost:18000" if os.getenv("IN_DOCKER", "False").lower() == "true" else "http://odyn.sparsity.cloud:18000"
+odyn = Odyn()
 
 # Global config
 config = {}
@@ -71,9 +69,7 @@ def load_config():
 
 def get_enclave_address():
     """Get the Ethereum address from the enclave."""
-    response = requests.get(f"{ODYN_API}/v1/eth/address")
-    response.raise_for_status()
-    return response.json()["address"]
+    return odyn.eth_address()
 
 def fetch_btc_price():
     """Fetch BTC price from CoinGecko API."""
@@ -124,21 +120,11 @@ def sign_and_send_tx(tx_data, to_address, nonce, gas_limit=100000):
     raw_payload = "0x02" + rlp_encoded.hex()
 
     # Sign using enclave
-    tx_payload = {
-        "include_attestation": False,
-        "payload": {
-            "kind": "raw_rlp",
-            "raw_payload": raw_payload
-        }
+    payload = {
+        "kind": "raw_rlp",
+        "raw_payload": raw_payload,
     }
-
-    response = requests.post(
-        f"{ODYN_API}/v1/eth/sign-tx",
-        json=tx_payload,
-        headers={"Content-Type": "application/json"}
-    )
-    response.raise_for_status()
-    result = response.json()
+    result = odyn.sign_tx(payload)
 
     # Send signed transaction
     tx_hash = w3.eth.send_raw_transaction(result["raw_transaction"])

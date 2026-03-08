@@ -65,7 +65,7 @@ cd enclave && python app.py
 secured-chat-bot/
 ├── enclave/           # Python Flask backend (runs in TEE)
 │   ├── app.py         # Main service
-│   ├── odyn.py        # TEE API wrapper
+│   ├── nova_python_sdk/ # Vendored canonical Nova SDK
 │   └── frontend/      # Built frontend (ignored by git)
 ├── frontend/          # Next.js frontend source
 ├── Dockerfile         # Multi-stage build (builds frontend)
