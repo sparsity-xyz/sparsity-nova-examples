@@ -53,7 +53,7 @@ capsule_runtime = CapsuleRuntime()  # Handles TEE features automatically
 w3 = Web3(Web3.HTTPProvider(RPC_URL))
 
 # 1. Get TEE wallet address
-address = capsule-runtime.eth_address()
+address = capsule_runtime.eth_address()
 
 # 2. Listen for on-chain events
 contract.events.RequestCreated().process_events(handle_request)
@@ -64,7 +64,7 @@ def handle_request(event):
     
     # 4. Sign and submit fulfillment transaction
     tx = contract.functions.fulfill(event.args.requestId, data).build_transaction(...)
-    signed = capsule-runtime.sign_tx(tx)
+    signed = capsule_runtime.sign_tx(tx)
     w3.eth.send_raw_transaction(signed["raw_transaction"])
 ```
 

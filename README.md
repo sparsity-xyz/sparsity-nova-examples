@@ -75,7 +75,7 @@ EXPOSE 8000
 CMD ["python", "app.py"]
 ```
 
-### 2. An `capsule.yaml`
+### 2. A `capsule.yaml`
 
 For Nova deployments, the control plane generates the authoritative manifest from app settings. The committed example manifests in this repo are useful for local runs, but Nova production behavior is defined by the generated manifest.
 

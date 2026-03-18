@@ -96,7 +96,7 @@ async def get_attestation():
     try:
         att = capsule_runtime.get_attestation()
         # Return raw binary CBOR data to match production behavior
-        return Response(content=att, media_type="application/octet-stream")
+        return Response(content=att, media_type="application/cbor")
     except Exception as e:
         logger.error(f"Attestation failed: {e}")
         return {"error": str(e)}, 500
