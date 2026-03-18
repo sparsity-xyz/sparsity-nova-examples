@@ -12,7 +12,7 @@ from flask import Flask, jsonify
 from eth_utils import to_checksum_address
 from rlp import encode as rlp_encode
 from web3 import Web3
-from nova_python_sdk.odyn import Odyn
+from nova_python_sdk.capsule_runtime import CapsuleRuntime
 
 # Configure logging
 logging.basicConfig(
@@ -22,7 +22,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
-odyn = Odyn()
+capsule_runtime = CapsuleRuntime()
 
 # Global config
 config = {}
@@ -69,7 +69,7 @@ def load_config():
 
 def get_enclave_address():
     """Get the Ethereum address from the enclave."""
-    return odyn.eth_address()
+    return capsule_runtime.eth_address()
 
 def fetch_btc_price():
     """Fetch BTC price from CoinGecko API."""
@@ -124,7 +124,7 @@ def sign_and_send_tx(tx_data, to_address, nonce, gas_limit=100000):
         "kind": "raw_rlp",
         "raw_payload": raw_payload,
     }
-    result = odyn.sign_tx(payload)
+    result = capsule_runtime.sign_tx(payload)
 
     # Send signed transaction
     tx_hash = w3.eth.send_raw_transaction(result["raw_transaction"])

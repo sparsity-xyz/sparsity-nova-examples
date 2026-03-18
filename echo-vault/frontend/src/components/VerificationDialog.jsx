@@ -138,7 +138,7 @@ export default function VerificationDialog({ isOpen, onClose, data }) {
                                     <div className="p-4 bg-slate-950/30 space-y-4">
                                         <div className="grid grid-cols-1 gap-4">
                                             <div>
-                                                <label className="text-[10px] font-black text-slate-500 uppercase tracking-tighter block mb-1">Public Key (Enclaver Internal)</label>
+                                                <label className="text-[10px] font-black text-slate-500 uppercase tracking-tighter block mb-1">Public Key (Capsule Internal)</label>
                                                 <div className="p-2 bg-black/40 rounded-lg font-mono text-[10px] text-blue-400 break-all max-h-24 overflow-y-auto">
                                                     {decodedAttestation.public_key || 'N/A'}
                                                 </div>

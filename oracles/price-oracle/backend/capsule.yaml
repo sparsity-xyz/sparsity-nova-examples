@@ -3,8 +3,8 @@ name: "btc-oracle"
 target: "btc-oracle-enclave:latest"
 sources:
   app: "btc-oracle:latest"
-  odyn: "odyn-dev:latest"
-  sleeve: "enclaver-wrapper-base-dev:latest"
+  capsule-runtime: "capsule-runtime-dev:latest"
+  capsule-shell: "capsule-wrapper-base-dev:latest"
 defaults:
   memory_mb: 2048
 ingress:

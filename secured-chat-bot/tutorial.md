@@ -85,7 +85,7 @@ secured-chat-bot/
 │   └── ai_models/     # AI integrations
 ├── frontend/          # Next.js frontend source
 ├── Dockerfile         # Multi-stage build
-├── enclaver.yaml      # TEE configuration
+├── capsule.yaml      # TEE configuration
 ├── Makefile           # Build automation
 ├── README.md          # Project overview
 └── tutorial.md        # This guide
@@ -102,13 +102,13 @@ The vendored `nova_python_sdk` provides the shared interface to enclave TEE serv
 
 The app keeps its response-envelope formatting in `app.py`, while the shared runtime calls come from `enclave/nova_python_sdk/`.
 
-📄 **Source**: [enclave/nova_python_sdk/odyn.py](enclave/nova_python_sdk/odyn.py)
+📄 **Source**: [enclave/nova_python_sdk/capsule_runtime.py](enclave/nova_python_sdk/capsule_runtime.py)
 
 ### 2.3 Main Application (Flask)
 
 The `app.py` handles:
 - **API Key Caching**: Stores the AI API key in memory within the secure enclave.
-- **Encryption Logic**: Uses Odyn to decrypt incoming requests and encrypt outgoing responses.
+- **Encryption Logic**: Uses Capsule Runtime to decrypt incoming requests and encrypt outgoing responses.
 - **Static Serving**: Serves the built frontend from the `frontend/` directory.
 
 📄 **Source**: [enclave/app.py](enclave/app.py)
@@ -124,7 +124,7 @@ python app.py
 ```
 
 > [!TIP]
-> When running locally, the service uses a mock Odyn API at `odyn.sparsity.cloud:18000`. In production, it connects to the enclave-local Odyn endpoint at `127.0.0.1:18000`.
+> When running locally, the service uses the Capsule API mock service at `capsule-runtime.sparsity.cloud:18000`. In production, it connects to the enclave-local Primary API served by Capsule Runtime at `127.0.0.1:18000`.
 
 ## 3. Develop Frontend Application
 
@@ -198,7 +198,7 @@ docker build -t secured-chat-bot .
 
 1. Go to [https://sparsity.cloud](https://sparsity.cloud)
 2. Create a new application
-3. Upload the `secured-chat-bot/` project directory (the platform will use the root `Dockerfile` and `enclaver.yaml`)
+3. Upload the `secured-chat-bot/` project directory (the platform will use the root `Dockerfile` and `capsule.yaml`)
 4. Deploy the application
 5. Wait for the enclave to build and start
 
@@ -237,7 +237,7 @@ In the Chat UI, click on the **Shield Icon** to view the full verification detai
 
 In this tutorial, you have learned how to:
 
-1. ✅ Build a secure enclave backend using **Flask** and **Odyn**.
+1. ✅ Build a secure enclave backend using **Flask** and **Capsule Runtime**.
 2. ✅ Implement **End-to-End Encryption** between a browser and a TEE.
 3. ✅ Parse and verify **AWS Nitro Attestation Documents** in the frontend.
 4. ✅ Securely cache and use **AI API keys** within a TEE.

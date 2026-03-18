@@ -228,10 +228,10 @@ The vendored `nova_python_sdk` provides an interface to the enclave's TEE servic
 - **`encrypt()`** / **`decrypt()`**: ECDH-based encryption
 
 **Key Points:**
-- In enclave (`IN_ENCLAVE=True`): Uses `127.0.0.1:18000` (real Odyn)
-- In development: Uses mock API at `odyn.sparsity.cloud:18000`
+- In enclave (`IN_ENCLAVE=True`): Uses `127.0.0.1:18000` (real Capsule Runtime)
+- In development: Uses mock API at `capsule-runtime.sparsity.cloud:18000`
 
-📄 **Source**: [enclave/nova_python_sdk/odyn.py](enclave/nova_python_sdk/odyn.py)
+📄 **Source**: [enclave/nova_python_sdk/capsule_runtime.py](enclave/nova_python_sdk/capsule_runtime.py)
 
 ### 4.4 Main Application
 
@@ -240,7 +240,7 @@ The main application includes:
 - **FastAPI service** with status endpoint
 - **Web3 connection** to blockchain
 - **Event listener** for `RandomNumberRequested` events
-- **Transaction signing** via Odyn API
+- **Transaction signing** via Capsule API
 - **Random number generation** using NSM hardware random
 
 📄 **Source**: [enclave/main.py](enclave/main.py)
@@ -277,7 +277,7 @@ cd enclave
 # Build
 docker build -t rng-oracle-dev .
 
-# Run (uses mock Odyn API)
+# Run (uses the Capsule API mock service)
 docker run -p 8000:8000 rng-oracle-dev
 ```
 
@@ -610,7 +610,7 @@ You have learned how to:
 1. ✅ Design the RNG Oracle architecture with on-chain and off-chain components
 2. ✅ Implement smart contracts with Nova Platform integration (`ISparsityApp`)
 3. ✅ Deploy and verify contracts on Base Sepolia
-4. ✅ Build off-chain enclave applications using Python and Odyn API
+4. ✅ Build off-chain enclave applications using Python and Capsule API
 5. ✅ Generate cryptographically secure random numbers using NSM
 6. ✅ Deploy to the Nova Platform as a TEE enclave
 7. ✅ Verify on-chain operator registration

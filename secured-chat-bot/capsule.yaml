@@ -3,8 +3,8 @@ name: "secured-chat-bot"
 target: "secured-chat-bot-enclave:latest"
 sources:
   app: "."
-  # odyn: "odyn-dev:latest"
-  # sleeve: "enclaver-wrapper-base-dev:latest"
+  # capsule-runtime: "capsule-runtime-dev:latest"
+  # capsule-shell: "capsule-wrapper-base-dev:latest"
 defaults:
   memory_mb: 2048
 ingress:

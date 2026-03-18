@@ -3,7 +3,7 @@ import logging
 import threading
 import time
 from typing import List, Dict, Any, Optional
-from nova_python_sdk.odyn import Odyn
+from nova_python_sdk.capsule_runtime import CapsuleRuntime
 from chain import Chain
 
 logger = logging.getLogger(__name__)
@@ -15,10 +15,10 @@ class HistoryLimitExceeded(Exception):
 class EchoTask:
     """Background task to poll for transfers and echo them back."""
     
-    def __init__(self, odyn: Odyn, chain: Chain):
-        self.odyn = odyn
+    def __init__(self, capsule_runtime: CapsuleRuntime, chain: Chain):
+        self.capsule_runtime = capsule_runtime
         self.chain = chain
-        self.address = odyn.eth_address()
+        self.address = capsule_runtime.eth_address()
         self.history: List[Dict[str, Any]] = []
         self.is_running = False
         self.last_block = 0
@@ -40,7 +40,7 @@ class EchoTask:
         # 1. Load state from S3
         if not self._load_state():
             # Initial startup or migration
-            saved_block = self.odyn.s3_get("last_block")
+            saved_block = self.capsule_runtime.s3_get("last_block")
             if saved_block:
                 self.last_block = int(saved_block.decode())
                 self.persisted_block = self.last_block
@@ -60,7 +60,7 @@ class EchoTask:
     def _load_state(self) -> bool:
         """Load unified state from S3."""
         try:
-            data = self.odyn.s3_get("state.json")
+            data = self.capsule_runtime.s3_get("state.json")
             if not data:
                 return False
             
@@ -90,7 +90,7 @@ class EchoTask:
                 "updated_at": int(time.time())
             }
             data = json.dumps(state).encode()
-            if self.odyn.s3_put("state.json", data):
+            if self.capsule_runtime.s3_put("state.json", data):
                 self._dirty = False
                 self._last_save_at = time.time()
                 self.persisted_block = self.last_block
@@ -111,7 +111,7 @@ class EchoTask:
         """Rebuild history and pending list by scanning S3 for transaction records (Legacy)."""
         try:
             logger.info("Recovering legacy state from echoes/ S3 prefix...")
-            res = self.odyn.s3_list(prefix="echoes/")
+            res = self.capsule_runtime.s3_list(prefix="echoes/")
             keys = res.get("keys", [])
             
             temp_history = []
@@ -119,7 +119,7 @@ class EchoTask:
             success_count = 0
             
             for key in keys:
-                data = self.odyn.s3_get(key)
+                data = self.capsule_runtime.s3_get(key)
                 if data:
                     try:
                         tx_data = json.loads(data.decode())
@@ -317,7 +317,7 @@ class EchoTask:
                 "data": "0x"
             }
             
-            signed_tx = self.odyn.sign_tx(tx_params)
+            signed_tx = self.capsule_runtime.sign_tx(tx_params)
             echo_hash = self.chain.send_raw_transaction(signed_tx["raw_transaction"])
             logger.info(f"Echoed! Hash: {echo_hash}")
 

@@ -12,7 +12,7 @@ from fastapi.requests import Request
 from fastapi.staticfiles import StaticFiles
 
 from config import Config
-from nova_python_sdk.odyn import Odyn
+from nova_python_sdk.capsule_runtime import CapsuleRuntime
 
 
 logging.basicConfig(
@@ -39,10 +39,10 @@ class RandomNumberGenerator:
             abi=Config.CONTRACT_ABI,
         )
 
-        self.enclaver = Odyn()
+        self.capsule = CapsuleRuntime()
 
         # Operator account
-        self.operator_address = Web3.to_checksum_address(self.enclaver.eth_address())
+        self.operator_address = Web3.to_checksum_address(self.capsule.eth_address())
         logging.info(f"🔑 Operator: {self.operator_address}")
 
         # Check balance
@@ -136,7 +136,7 @@ class RandomNumberGenerator:
 
     @staticmethod
     def tx_to_payload(tx: dict) -> dict:
-        """Convert web3.py transaction dict to enclaver payload format."""
+        """Convert web3.py transaction dict to capsule payload format."""
         return {
             "kind": "structured",
             "chain_id": hex(tx["chainId"]),
@@ -151,7 +151,7 @@ class RandomNumberGenerator:
 
     def sign_tx(self, transaction_dict: dict) -> str:
         """
-        Sign transaction using the canonical Nova Odyn SDK.
+        Sign transaction using the canonical Nova CapsuleRuntime SDK.
         
         Args:
             transaction_dict: Transaction dictionary with web3.py format
@@ -159,7 +159,7 @@ class RandomNumberGenerator:
         Returns:
             Signed raw transaction hex string
         """
-        result = self.enclaver.sign_tx(self.tx_to_payload(transaction_dict))
+        result = self.capsule.sign_tx(self.tx_to_payload(transaction_dict))
         return result["raw_transaction"]
 
     def generate_random_numbers(self, min_val: int, max_val: int, count: int) -> List[int]:
@@ -175,7 +175,7 @@ class RandomNumberGenerator:
             List of random numbers
         """
         # Get random seed from enclave
-        seed = self.enclaver.get_random_bytes()
+        seed = self.capsule.get_random_bytes()
         random.seed(seed)
         
         random_numbers = []
@@ -235,7 +235,7 @@ class RandomNumberGenerator:
                 "chainId": self.chain_id,
             })
 
-            # Sign transaction using local helper (calls enclaver endpoint)
+            # Sign transaction using local helper (calls capsule endpoint)
             signed_txn = self.sign_tx(transaction)
 
             # Send transaction

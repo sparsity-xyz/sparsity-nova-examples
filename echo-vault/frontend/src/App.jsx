@@ -88,7 +88,7 @@ function App() {
       setAttestationData({
         attestation: base64Attestation,
         ethAddr: status?.address,
-        publicKey: 'Enclaver Internal' // Placeholder or fetch if available
+        publicKey: 'Capsule Internal' // Placeholder or fetch if available
       })
       setShowAttestation(true)
     } catch (err) {
