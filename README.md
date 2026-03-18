@@ -1,42 +1,42 @@
 # Sparsity Nova Examples
 
-This repository contains reference applications for the current Sparsity Nova stack and a practical guide for building enclave applications that match the latest `sparsity-nova-platform` and `enclaver` implementations.
+This repository contains reference applications for the current Sparsity Nova stack and a practical guide for building enclave applications that match the latest `sparsity-nova-platform` and `capsule-cli` implementations.
 
 The guidance here is aligned with:
 
 - `sparsity-nova-platform`: control plane, build pipeline, runtime agent, attestation routing, and deployment behavior
-- `enclaver`: build/run tooling, Odyn supervisor, Primary API, Aux API, S3/KMS/app-wallet/Helios integrations
+- `capsule-cli`: build/run tooling, Capsule-Runtime supervisor, Primary API, Aux API, S3/KMS/app-wallet/Helios integrations
 
 ## How Nova Works Today
 
 In the current Nova implementation, a production deployment looks like this:
 
 1. You provide a normal Dockerized app.
-2. Nova control plane generates `nova-build.yaml` and a deployment-specific `enclaver.yaml`.
+2. Nova control plane generates `nova-build.yaml` and a deployment-specific `capsule.yaml`.
 3. Nova App Hub / GitHub Actions builds `Docker -> EIF -> release image`, captures PCRs, and emits a signed `build-attestation.json`.
-4. The runtime agent on EC2 pulls the pre-built image from ECR, verifies the image digest, and starts it with `enclaver run`.
+4. The runtime agent on EC2 pulls the pre-built image from ECR, verifies the image digest, and starts it with `capsule-cli run`.
 5. The runtime fetches the enclave attestation from the Aux API, configures Caddy, and exposes:
    - your application on the deployment URL
    - `POST /.well-known/attestation` on the same hostname
 6. ZK proof generation and on-chain registration happen after the enclave is running.
 
-The examples in this repo are written for that flow: keep the application code simple and let Enclaver/Odyn provide enclave-native services.
+The examples in this repo are written for that flow: keep the application code simple and let Capsule/Capsule-Runtime provide enclave-native services.
 
 ## Current Runtime Model
 
-Enclaver builds a release image that contains:
+capsule-cli builds a release image that contains:
 
-- your app image, amended with `/sbin/odyn` and `/etc/enclaver/enclaver.yaml`
+- your app image, amended with `/sbin/capsule-runtime` and `/etc/capsule/capsule.yaml`
 - the generated `application.eif`
-- the Sleeve runtime image that launches Nitro Enclaves with `nitro-cli`
+- the Capsule-Shell runtime image that launches Nitro Enclaves with `nitro-cli`
 
 At runtime:
 
-- `enclaver-run` starts the enclave on the host side
-- `odyn` runs as PID 1 inside the enclave
-- your application runs under Odyn supervision
-- outbound traffic goes through Odyn's egress proxy
-- attestation, signing, encryption, storage, and optional KMS/app-wallet features are exposed through Odyn's API surface
+- `capsule-run` starts the enclave on the host side
+- `capsule-runtime` runs as PID 1 inside the enclave
+- your application runs under Capsule-Runtime supervision
+- outbound traffic goes through Capsule-Runtime's egress proxy
+- attestation, signing, encryption, storage, and optional KMS/app-wallet features are exposed through Capsule-Runtime's API surface
 
 ### Network Surfaces
 
@@ -68,14 +68,14 @@ WORKDIR /app
 COPY . .
 RUN pip install -r requirements.txt
 
-# This is an app-level convention, not something Enclaver injects automatically.
+# This is an app-level convention, not something Capsule injects automatically.
 ENV IN_ENCLAVE=false
 
 EXPOSE 8000
 CMD ["python", "app.py"]
 ```
 
-### 2. An `enclaver.yaml`
+### 2. An `capsule.yaml`
 
 For Nova deployments, the control plane generates the authoritative manifest from app settings. The committed example manifests in this repo are useful for local runs, but Nova production behavior is defined by the generated manifest.
 
@@ -159,9 +159,9 @@ metadata:
 
 This config drives the build pipeline that produces the release image and build provenance.
 
-## Current Odyn API Surface
+## Current Capsule-Runtime API Surface
 
-Inside the enclave, Odyn exposes localhost-only HTTP APIs. The full API lives on the Primary API port; the public attestation path used by Nova is backed by the Aux API.
+Inside the enclave, Capsule-Runtime exposes localhost-only HTTP APIs. The full API lives on the Primary API port; the public attestation path used by Nova is backed by the Aux API.
 
 ### Core Endpoints
 
@@ -188,10 +188,10 @@ Inside the enclave, Odyn exposes localhost-only HTTP APIs. The full API lives on
 
 - `POST /v1/attestation` returns raw CBOR bytes with content type `application/cbor`
 - `nonce` is optional
-- `public_key` is optional; if omitted, Odyn uses the enclave encryption public key
+- `public_key` is optional; if omitted, Capsule-Runtime uses the enclave encryption public key
 - `user_data` must be a JSON object when provided
-- Odyn injects `eth_addr` into `user_data`
-- if app-wallet material is available, Odyn also injects `app_wallet`
+- Capsule-Runtime injects `eth_addr` into `user_data`
+- if app-wallet material is available, Capsule-Runtime also injects `app_wallet`
 
 ## Public Attestation vs Internal Attestation
 
@@ -205,10 +205,10 @@ Some examples in this repo still implement `/.well-known/attestation` in app cod
 
 ## Outbound Networking: Current Constraint
 
-Nitro Enclaves do not have direct outbound network access. In the current Enclaver implementation:
+Nitro Enclaves do not have direct outbound network access. In the current Capsule implementation:
 
-- Odyn provides an HTTP(S) egress proxy inside the enclave
-- Odyn sets `http_proxy`, `https_proxy`, `HTTP_PROXY`, `HTTPS_PROXY`, `no_proxy`, and `NO_PROXY` for your app when egress is enabled
+- Capsule-Runtime provides an HTTP(S) egress proxy inside the enclave
+- Capsule-Runtime sets `http_proxy`, `https_proxy`, `HTTP_PROXY`, `HTTPS_PROXY`, `no_proxy`, and `NO_PROXY` for your app when egress is enabled
 - your HTTP client library must respect proxy settings, or you must configure a proxy explicitly
 
 Do not assume that "normal networking" always works unchanged inside the enclave. This is a common failure mode, especially with libraries that ignore proxy environment variables by default.
@@ -221,24 +221,24 @@ The examples in this repo commonly use an app-level `IN_ENCLAVE` convention:
 import os
 
 IN_ENCLAVE = os.getenv("IN_ENCLAVE", "false").lower() == "true"
-ODYN_BASE_URL = "http://127.0.0.1:18000" if IN_ENCLAVE else "http://odyn.sparsity.cloud:18000"
+CAPSULE-RUNTIME_BASE_URL = "http://127.0.0.1:18000" if IN_ENCLAVE else "http://capsule-runtime.sparsity.cloud:18000"
 ```
 
-Important caveats from the current Enclaver docs:
+Important caveats from the current Capsule docs:
 
-- `IN_ENCLAVE` is not injected automatically by Enclaver
+- `IN_ENCLAVE` is not injected automatically by Capsule
 - the external mock service is a convenience endpoint, not the authoritative implementation
-- you should verify important behavior against the real Enclaver code or a real enclave deployment
+- you should verify important behavior against the real Capsule code or a real enclave deployment
 
 ### Current Mock Endpoints Used by Examples
 
-Nova currently operates a special mockup service that backs `odyn.sparsity.cloud`. It is useful for lightweight development loops and exposes:
+Nova currently operates a special mockup service that backs `capsule-runtime.sparsity.cloud`. It is useful for lightweight development loops and exposes:
 
-- Primary API: `http://odyn.sparsity.cloud:18000`
-- Aux API: `http://odyn.sparsity.cloud:18001`
-- Helios RPC presets: `http://odyn.sparsity.cloud:18545` through `:18553`
+- Primary API: `http://capsule-runtime.sparsity.cloud:18000`
+- Aux API: `http://capsule-runtime.sparsity.cloud:18001`
+- Helios RPC presets: `http://capsule-runtime.sparsity.cloud:18545` through `:18553`
 
-Treat this as a development convenience. It is not version-locked to the Enclaver repo.
+Treat this as a development convenience. It is not version-locked to the Capsule repo.
 
 ## Build Provenance in the Current Platform
 
@@ -262,7 +262,7 @@ The build attestation is signed with Sigstore/cosign, stored off-chain, and refe
 
 For the most complete Python helper wrapper in this repo, start with:
 
-- [`echo-vault/enclave/odyn.py`](./echo-vault/enclave/odyn.py)
+- [`echo-vault/enclave/capsule-runtime.py`](./echo-vault/enclave/capsule-runtime.py)
 
 ## Quick Start
 
@@ -284,7 +284,7 @@ The current production path is:
 
 1. push your app repo with a normal Dockerfile
 2. create the app in Nova Portal
-3. configure advanced settings that determine generated `nova-build.yaml` and `enclaver.yaml`
+3. configure advanced settings that determine generated `nova-build.yaml` and `capsule.yaml`
 4. trigger a build
 5. enroll the resulting version if on-chain registration is enabled
 6. deploy the enrolled version
@@ -292,8 +292,8 @@ The current production path is:
 
 ## Related Reading
 
-- [Enclaver Internal API](https://github.com/sparsity-xyz/enclaver/blob/sparsity/docs/internal_api.md)
-- [Enclaver Manifest Reference](https://github.com/sparsity-xyz/enclaver/blob/sparsity/docs/enclaver.yaml)
-- [Enclaver Architecture](https://github.com/sparsity-xyz/enclaver/blob/sparsity/docs/enclaver-architecture.md)
+- [Capsule Capsule API](https://github.com/sparsity-xyz/capsule/blob/sparsity/docs/internal_api.md)
+- [Capsule Manifest Reference](https://github.com/sparsity-xyz/capsule/blob/sparsity/docs/capsule.yaml)
+- [Capsule Architecture](https://github.com/sparsity-xyz/capsule/blob/sparsity/docs/capsule-architecture.md)
 - [Nova Build Attestation](https://github.com/sparsity-xyz/sparsity-nova-platform/blob/main/docs/build-attestation.md)
 - [Nova Runtime Port Exposure Flow](https://github.com/sparsity-xyz/sparsity-nova-platform/blob/main/docs/runtime-port-exposure-flow.md)

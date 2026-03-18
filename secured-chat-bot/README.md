@@ -39,7 +39,7 @@ sequenceDiagram
 # Build frontend and copy to enclave
 make build-frontend
 
-# Run backend (uses mock Odyn for local dev)
+# Run backend (uses mock Capsule-Runtime for local dev)
 cd enclave && python app.py
 ```
 
@@ -69,7 +69,7 @@ secured-chat-bot/
 │   └── frontend/      # Built frontend (ignored by git)
 ├── frontend/          # Next.js frontend source
 ├── Dockerfile         # Multi-stage build (builds frontend)
-├── enclaver.yaml      # TEE configuration
+├── capsule.yaml      # TEE configuration
 ├── Makefile           # Build automation
 └── README.md
 ```

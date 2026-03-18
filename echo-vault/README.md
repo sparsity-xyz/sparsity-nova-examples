@@ -9,7 +9,7 @@ Echo Vault consists of two main components:
 1.  **TEE Enclave (Backend)**:
     *   **FastAPI Service**: Runs a Python backend within the Nitro Enclave.
     *   **Trustless Helios Node**: Integrates the Helios light client for verified access to Base Sepolia, bypassing central RPC providers.
-    *   **Canonical Nova SDK**: Vendors `enclave/nova_python_sdk/` from `nova-app-template` for Odyn and shared RPC helpers.
+    *   **Canonical Nova SDK**: Vendors `enclave/nova_python_sdk/` from `nova-app-template` for Capsule-Runtime and shared RPC helpers.
     *   **Per-Transaction Persistence**: Stores each transaction's state individually in S3 (`echoes/<hash>.json`). Rebuilds history and processed state on startup.
     *   **Resilient Sync**: Automatically detects and recovers from light client history limits (EIP-2935 buffer range), jumping to the latest block if offline too long.
     *   **Batch Nonce Management**: Tracks nonces locally to support echoing multiple transactions in rapid succession or within the same block.
@@ -23,7 +23,7 @@ Echo Vault consists of two main components:
 ### Prerequisites
 - Python 3.12+
 - Node.js 18+
-- [Enclaver CLI](https://github.com/mclarkson/enclaver) (for TEE builds)
+- [Capsule CLI](https://github.com/mclarkson/capsule) (for TEE builds)
 
 ### Local Development (Mock Mode)
 To run the application locally without a real TEE:

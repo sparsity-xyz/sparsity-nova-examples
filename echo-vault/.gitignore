@@ -21,8 +21,8 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# Enclaver / TEE
-.enclaver/
+# Capsule / TEE
+.capsule/
 enclave/frontend/
 
 # OS

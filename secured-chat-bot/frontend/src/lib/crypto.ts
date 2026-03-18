@@ -1,12 +1,12 @@
 /**
  * Crypto module for ECDH + HKDF-SHA256 + AES-256-GCM.
  * 
- * Supports both P-384 (Odyn standard) and secp256k1 (ETH signing key) for encryption.
+ * Supports both P-384 (Capsule-Runtime standard) and secp256k1 (ETH signing key) for encryption.
  * Automatically detects the curve from the enclave's public key.
  *
  * Key derivation (new protocol):
  *   salt  = sorted(pubkey_A_sec1, pubkey_B_sec1) || nonce
- *   info  = "enclaver-ecdh-aes256gcm-v1"
+ *   info  = "capsule-ecdh-aes256gcm-v1"
  *   key   = HKDF-SHA256(IKM=shared_secret, salt, info, length=32)
  */
 
@@ -268,7 +268,7 @@ export class EnclaveClient {
      * Derive a per-message AES-256-GCM key using HKDF-SHA256.
      *
      * salt = sorted(myPubSec1, peerPubSec1) || nonce
-     * info = "enclaver-ecdh-aes256gcm-v1"
+     * info = "capsule-ecdh-aes256gcm-v1"
      */
     private async deriveMessageKey(
         sharedSecret: ArrayBuffer,
@@ -299,7 +299,7 @@ export class EnclaveClient {
                 name: 'HKDF',
                 hash: 'SHA-256',
                 salt: salt,
-                info: new TextEncoder().encode('enclaver-ecdh-aes256gcm-v1')
+                info: new TextEncoder().encode('capsule-ecdh-aes256gcm-v1')
             },
             hkdfKey,
             { name: 'AES-GCM', length: 256 },

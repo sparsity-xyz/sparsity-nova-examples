@@ -14,7 +14,7 @@ def estimate_priority_from_fee_history(w3: Web3, blocks: int = 5, percentile: fl
 
 
 def tx_to_payload(tx: dict) -> dict:
-    """Convert web3.py transaction dict to enclaver payload format."""
+    """Convert web3.py transaction dict to capsule payload format."""
     return {
         "kind": "structured",
         "chain_id": hex(tx["chainId"]),
@@ -30,7 +30,7 @@ def tx_to_payload(tx: dict) -> dict:
 
 def sign_tx(enclave: Enclave, transaction_dict: dict) -> str:
     """
-    Sign transaction using enclaver's /v1/eth/sign-tx endpoint.
+    Sign transaction using capsule's /v1/eth/sign-tx endpoint.
     
     Args:
         enclave: Enclave instance

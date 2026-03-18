@@ -60,11 +60,11 @@ build-contract:
 deploy-enclave:
 	@echo "Transferring source files to EC2..."
 	$(SSH_CMD) "mkdir -p ~/btc-oracle"
-	$(SCP_CMD) app.py requirements.txt config.json Dockerfile enclaver.yaml $(EC2_HOST):~/btc-oracle/
+	$(SCP_CMD) app.py requirements.txt config.json Dockerfile capsule.yaml $(EC2_HOST):~/btc-oracle/
 	@echo "Building Docker image on EC2..."
 	$(SSH_CMD) "cd ~/btc-oracle && docker build -t $(APP_IMAGE) ."
 	@echo "Building enclave image on EC2..."
-	$(SSH_CMD) "cd ~/btc-oracle && ~/enclaver build -f enclaver.yaml"
+	$(SSH_CMD) "cd ~/btc-oracle && ~/capsule-cli build -f capsule.yaml"
 	@echo "Starting enclave..."
 	$(SSH_CMD) "docker stop btc-oracle 2>/dev/null || true && \
 		docker rm btc-oracle 2>/dev/null || true && \

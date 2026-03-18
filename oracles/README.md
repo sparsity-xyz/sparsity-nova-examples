@@ -21,7 +21,7 @@ Traditional oracles require users to trust the operator. Nova-powered oracles so
 │  ┌───────────────────────────────────────────────────────────┐  │
 │  │                    AWS Nitro Enclave                      │  │
 │  │  ┌───────────────┐   ┌─────────────────────────────────┐  │  │
-│  │  │     Odyn      │   │      Your Oracle Service        │  │  │
+│  │  │     Capsule-Runtime      │   │      Your Oracle Service        │  │  │
 │  │  │  (Supervisor) │──▶│  - Listen for on-chain events   │  │  │
 │  │  │               │   │  - Fetch external data          │  │  │
 │  │  │  • ETH Wallet │   │  - Sign & submit transactions   │  │  │
@@ -46,14 +46,14 @@ Create a Python/Node.js service that:
 
 ```python
 # Typical oracle service pattern
-from nova_python_sdk.odyn import Odyn
+from nova_python_sdk.capsule-runtime import Capsule-Runtime
 from web3 import Web3
 
-odyn = Odyn()  # Handles TEE features automatically
+capsule-runtime = Capsule-Runtime()  # Handles TEE features automatically
 w3 = Web3(Web3.HTTPProvider(RPC_URL))
 
 # 1. Get TEE wallet address
-address = odyn.eth_address()
+address = capsule-runtime.eth_address()
 
 # 2. Listen for on-chain events
 contract.events.RequestCreated().process_events(handle_request)
@@ -64,7 +64,7 @@ def handle_request(event):
     
     # 4. Sign and submit fulfillment transaction
     tx = contract.functions.fulfill(event.args.requestId, data).build_transaction(...)
-    signed = odyn.sign_tx(tx)
+    signed = capsule-runtime.sign_tx(tx)
     w3.eth.send_raw_transaction(signed["raw_transaction"])
 ```
 
@@ -114,7 +114,7 @@ anvil
 # Terminal 2: Deploy contract
 make deploy-contract-local
 
-# Terminal 3: Run oracle service (uses mock Odyn)
+# Terminal 3: Run oracle service (uses mock Capsule-Runtime)
 IN_ENCLAVE=false python main.py
 ```
 

@@ -11,7 +11,7 @@ A minimal TEE app example that returns:
 - `POST /.well-known/attestation`:
   - Returns raw CBOR attestation document
 
-## Local Development (Mock Odyn)
+## Local Development (Mock Capsule-Runtime)
 
 ```bash
 cd enclave
@@ -34,5 +34,5 @@ docker run --rm -p 8000:8000 -e IN_ENCLAVE=false hello-world-tee
 ## Notes
 
 - `IN_ENCLAVE=true` uses `http://127.0.0.1:18000` (inside enclave)
-- `IN_ENCLAVE=false` uses `http://odyn.sparsity.cloud:18000` (mock service)
+- `IN_ENCLAVE=false` uses `http://capsule-runtime.sparsity.cloud:18000` (mock service)
 - The backend vendors the canonical SDK under `enclave/nova_python_sdk/`

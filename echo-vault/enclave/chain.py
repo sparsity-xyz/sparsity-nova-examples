@@ -7,7 +7,7 @@ from nova_python_sdk.rpc import ChainRpc
 class Chain(ChainRpc):
     """Echo Vault chain helper using the canonical Nova RPC SDK."""
 
-    DEFAULT_MOCK_RPC = "http://odyn.sparsity.cloud:18545"
+    DEFAULT_MOCK_RPC = "http://capsule-runtime.sparsity.cloud:18545"
     DEFAULT_HELIOS_RPC = "http://127.0.0.1:18545"
 
     def __init__(self, rpc_url: Optional[str] = None):

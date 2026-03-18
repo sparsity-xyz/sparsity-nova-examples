@@ -13,4 +13,4 @@ build-frontend:
 	cp -r frontend/dist/* enclave/frontend/
 
 build-enclave:
-	enclaver build
+	capsule-cli build
