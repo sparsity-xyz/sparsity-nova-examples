@@ -114,7 +114,7 @@ anvil
 # Terminal 2: Deploy contract
 make deploy-contract-local
 
-# Terminal 3: Run oracle service (uses mock Capsule API)
+# Terminal 3: Run oracle service (uses the Capsule API mock service)
 IN_ENCLAVE=false python main.py
 ```
 

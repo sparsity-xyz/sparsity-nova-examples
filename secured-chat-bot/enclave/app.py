@@ -139,7 +139,7 @@ if os.getenv("IN_ENCLAVE", "false").lower() != "true":
         """
         Get attestation document from the enclave (local dev only).
         
-        Returns raw CBOR binary matching the production capsule-cli runtime format.
+        Returns raw CBOR binary matching the production Capsule Runtime attestation format.
         The CBOR contains a COSE Sign1 structure with the attestation document.
         """
         try:

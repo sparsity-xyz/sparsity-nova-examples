@@ -179,7 +179,7 @@ The service will automatically detect the authorization and begin processing req
 
 ## For Local Development
 
-When testing locally without an actual enclave, the Capsule Runtime class automatically uses the mock API at `http://capsule-runtime.sparsity.cloud:18000`. No configuration needed.
+When testing locally without an actual enclave, the `CapsuleRuntime` client automatically uses the Capsule API mock service at `http://capsule-runtime.sparsity.cloud:18000`. No configuration needed.
 
 ## License
 

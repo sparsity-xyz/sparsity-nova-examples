@@ -124,7 +124,7 @@ python app.py
 ```
 
 > [!TIP]
-> When running locally, the service uses a mock Capsule API at `capsule-runtime.sparsity.cloud:18000`. In production, it connects to the enclave-local Capsule Runtime endpoint at `127.0.0.1:18000`.
+> When running locally, the service uses the Capsule API mock service at `capsule-runtime.sparsity.cloud:18000`. In production, it connects to the enclave-local Primary API served by Capsule Runtime at `127.0.0.1:18000`.
 
 ## 3. Develop Frontend Application
 

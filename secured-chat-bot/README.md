@@ -39,7 +39,7 @@ sequenceDiagram
 # Build frontend and copy to enclave
 make build-frontend
 
-# Run backend (uses mock Capsule API for local dev)
+# Run backend (uses the Capsule API mock service for local dev)
 cd enclave && python app.py
 ```
 

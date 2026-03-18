@@ -277,7 +277,7 @@ cd enclave
 # Build
 docker build -t rng-oracle-dev .
 
-# Run (uses mock Capsule API)
+# Run (uses the Capsule API mock service)
 docker run -p 8000:8000 rng-oracle-dev
 ```
 
