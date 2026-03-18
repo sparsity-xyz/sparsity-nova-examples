@@ -292,8 +292,8 @@ The current production path is:
 
 ## Related Reading
 
-- [Capsule Capsule API](https://github.com/sparsity-xyz/capsule/blob/sparsity/docs/internal_api.md)
-- [Capsule Manifest Reference](https://github.com/sparsity-xyz/capsule/blob/sparsity/docs/capsule.yaml)
-- [Capsule Architecture](https://github.com/sparsity-xyz/capsule/blob/sparsity/docs/capsule-architecture.md)
+- [Capsule Capsule API](https://github.com/sparsity-xyz/nova-enclave-capsule/blob/sparsity/docs/internal_api.md)
+- [Capsule Manifest Reference](https://github.com/sparsity-xyz/nova-enclave-capsule/blob/sparsity/docs/capsule.yaml)
+- [Capsule Architecture](https://github.com/sparsity-xyz/nova-enclave-capsule/blob/sparsity/docs/capsule-architecture.md)
 - [Nova Build Attestation](https://github.com/sparsity-xyz/sparsity-nova-platform/blob/main/docs/build-attestation.md)
 - [Nova Runtime Port Exposure Flow](https://github.com/sparsity-xyz/sparsity-nova-platform/blob/main/docs/runtime-port-exposure-flow.md)
