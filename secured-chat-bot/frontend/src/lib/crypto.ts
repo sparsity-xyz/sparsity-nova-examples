@@ -1,7 +1,7 @@
 /**
  * Crypto module for ECDH + HKDF-SHA256 + AES-256-GCM.
  * 
- * Supports both P-384 (Capsule-Runtime standard) and secp256k1 (ETH signing key) for encryption.
+ * Supports both P-384 (Capsule Runtime standard) and secp256k1 (ETH signing key) for encryption.
  * Automatically detects the curve from the enclave's public key.
  *
  * Key derivation (new protocol):

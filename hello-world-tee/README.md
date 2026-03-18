@@ -11,7 +11,7 @@ A minimal TEE app example that returns:
 - `POST /.well-known/attestation`:
   - Returns raw CBOR attestation document
 
-## Local Development (Mock Capsule-Runtime)
+## Local Development (Capsule API Mock Service)
 
 ```bash
 cd enclave

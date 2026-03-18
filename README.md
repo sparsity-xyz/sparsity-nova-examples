@@ -5,7 +5,7 @@ This repository contains reference applications for the current Sparsity Nova st
 The guidance here is aligned with:
 
 - `sparsity-nova-platform`: control plane, build pipeline, runtime agent, attestation routing, and deployment behavior
-- `capsule-cli`: build/run tooling, Capsule-Runtime supervisor, Primary API, Aux API, S3/KMS/app-wallet/Helios integrations
+- `capsule-cli`: build/run tooling, Capsule Runtime supervisor, Capsule API, Aux API, S3/KMS/app-wallet/Helios integrations
 
 ## How Nova Works Today
 
@@ -20,7 +20,7 @@ In the current Nova implementation, a production deployment looks like this:
    - `POST /.well-known/attestation` on the same hostname
 6. ZK proof generation and on-chain registration happen after the enclave is running.
 
-The examples in this repo are written for that flow: keep the application code simple and let Capsule/Capsule-Runtime provide enclave-native services.
+The examples in this repo are written for that flow: keep the application code simple and let Capsule APIs exposed through Capsule Runtime provide enclave-native services.
 
 ## Current Runtime Model
 
@@ -34,9 +34,9 @@ At runtime:
 
 - `capsule-run` starts the enclave on the host side
 - `capsule-runtime` runs as PID 1 inside the enclave
-- your application runs under Capsule-Runtime supervision
-- outbound traffic goes through Capsule-Runtime's egress proxy
-- attestation, signing, encryption, storage, and optional KMS/app-wallet features are exposed through Capsule-Runtime's API surface
+- your application runs under Capsule Runtime supervision
+- outbound traffic goes through Capsule Runtime's egress proxy
+- attestation, signing, encryption, storage, and optional KMS/app-wallet features are exposed through Capsule APIs served by Capsule Runtime
 
 ### Network Surfaces
 
@@ -135,7 +135,7 @@ helios_rpc:
 
 Key points:
 
-- `api.listen_port` enables the full internal API on `127.0.0.1:18000`
+- `api.listen_port` enables the full Capsule API on `127.0.0.1:18000`
 - `aux_api.listen_port` enables the restricted attestation surface on `127.0.0.1:18001`
 - Nova normally adds the app port and `18001` to `ingress`
 - S3, KMS, app-wallet, and Helios are optional and manifest-driven
@@ -159,9 +159,9 @@ metadata:
 
 This config drives the build pipeline that produces the release image and build provenance.
 
-## Current Capsule-Runtime API Surface
+## Current Capsule API Surface
 
-Inside the enclave, Capsule-Runtime exposes localhost-only HTTP APIs. The full API lives on the Primary API port; the public attestation path used by Nova is backed by the Aux API.
+Inside the enclave, Capsule Runtime serves localhost-only Capsule APIs. The full API lives on the Primary API port; the public attestation path used by Nova is backed by the Aux API.
 
 ### Core Endpoints
 
@@ -188,10 +188,10 @@ Inside the enclave, Capsule-Runtime exposes localhost-only HTTP APIs. The full A
 
 - `POST /v1/attestation` returns raw CBOR bytes with content type `application/cbor`
 - `nonce` is optional
-- `public_key` is optional; if omitted, Capsule-Runtime uses the enclave encryption public key
+- `public_key` is optional; if omitted, Capsule Runtime uses the enclave encryption public key
 - `user_data` must be a JSON object when provided
-- Capsule-Runtime injects `eth_addr` into `user_data`
-- if app-wallet material is available, Capsule-Runtime also injects `app_wallet`
+- Capsule Runtime injects `eth_addr` into `user_data`
+- if app-wallet material is available, Capsule Runtime also injects `app_wallet`
 
 ## Public Attestation vs Internal Attestation
 
@@ -207,8 +207,8 @@ Some examples in this repo still implement `/.well-known/attestation` in app cod
 
 Nitro Enclaves do not have direct outbound network access. In the current Capsule implementation:
 
-- Capsule-Runtime provides an HTTP(S) egress proxy inside the enclave
-- Capsule-Runtime sets `http_proxy`, `https_proxy`, `HTTP_PROXY`, `HTTPS_PROXY`, `no_proxy`, and `NO_PROXY` for your app when egress is enabled
+- Capsule Runtime provides an HTTP(S) egress proxy inside the enclave
+- Capsule Runtime sets `http_proxy`, `https_proxy`, `HTTP_PROXY`, `HTTPS_PROXY`, `no_proxy`, and `NO_PROXY` for your app when egress is enabled
 - your HTTP client library must respect proxy settings, or you must configure a proxy explicitly
 
 Do not assume that "normal networking" always works unchanged inside the enclave. This is a common failure mode, especially with libraries that ignore proxy environment variables by default.
@@ -221,7 +221,7 @@ The examples in this repo commonly use an app-level `IN_ENCLAVE` convention:
 import os
 
 IN_ENCLAVE = os.getenv("IN_ENCLAVE", "false").lower() == "true"
-CAPSULE-RUNTIME_BASE_URL = "http://127.0.0.1:18000" if IN_ENCLAVE else "http://capsule-runtime.sparsity.cloud:18000"
+CAPSULE_RUNTIME_BASE_URL = "http://127.0.0.1:18000" if IN_ENCLAVE else "http://capsule-runtime.sparsity.cloud:18000"
 ```
 
 Important caveats from the current Capsule docs:
@@ -262,7 +262,7 @@ The build attestation is signed with Sigstore/cosign, stored off-chain, and refe
 
 For the most complete Python helper wrapper in this repo, start with:
 
-- [`echo-vault/enclave/capsule-runtime.py`](./echo-vault/enclave/capsule-runtime.py)
+- [`echo-vault/enclave/capsule_runtime.py`](./echo-vault/enclave/capsule_runtime.py)
 
 ## Quick Start
 
@@ -292,8 +292,8 @@ The current production path is:
 
 ## Related Reading
 
-- [Capsule Capsule API](https://github.com/sparsity-xyz/nova-enclave-capsule/blob/sparsity/docs/internal_api.md)
-- [Capsule Manifest Reference](https://github.com/sparsity-xyz/nova-enclave-capsule/blob/sparsity/docs/capsule.yaml)
-- [Capsule Architecture](https://github.com/sparsity-xyz/nova-enclave-capsule/blob/sparsity/docs/capsule-architecture.md)
+- [Capsule API](https://github.com/sparsity-xyz/nova-enclave-capsule/blob/main/docs/capsule-api.md)
+- [Capsule Manifest Reference](https://github.com/sparsity-xyz/nova-enclave-capsule/blob/main/docs/capsule.yaml)
+- [Capsule Architecture](https://github.com/sparsity-xyz/nova-enclave-capsule/blob/main/docs/capsule-architecture.md)
 - [Nova Build Attestation](https://github.com/sparsity-xyz/sparsity-nova-platform/blob/main/docs/build-attestation.md)
 - [Nova Runtime Port Exposure Flow](https://github.com/sparsity-xyz/sparsity-nova-platform/blob/main/docs/runtime-port-exposure-flow.md)

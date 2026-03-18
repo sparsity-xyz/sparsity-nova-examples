@@ -21,7 +21,7 @@ Traditional oracles require users to trust the operator. Nova-powered oracles so
 │  ┌───────────────────────────────────────────────────────────┐  │
 │  │                    AWS Nitro Enclave                      │  │
 │  │  ┌───────────────┐   ┌─────────────────────────────────┐  │  │
-│  │  │     Capsule-Runtime      │   │      Your Oracle Service        │  │  │
+│  │  │     Capsule Runtime      │   │      Your Oracle Service        │  │  │
 │  │  │  (Supervisor) │──▶│  - Listen for on-chain events   │  │  │
 │  │  │               │   │  - Fetch external data          │  │  │
 │  │  │  • ETH Wallet │   │  - Sign & submit transactions   │  │  │
@@ -46,10 +46,10 @@ Create a Python/Node.js service that:
 
 ```python
 # Typical oracle service pattern
-from nova_python_sdk.capsule-runtime import Capsule-Runtime
+from nova_python_sdk.capsule_runtime import CapsuleRuntime
 from web3 import Web3
 
-capsule-runtime = Capsule-Runtime()  # Handles TEE features automatically
+capsule_runtime = CapsuleRuntime()  # Handles TEE features automatically
 w3 = Web3(Web3.HTTPProvider(RPC_URL))
 
 # 1. Get TEE wallet address
@@ -114,7 +114,7 @@ anvil
 # Terminal 2: Deploy contract
 make deploy-contract-local
 
-# Terminal 3: Run oracle service (uses mock Capsule-Runtime)
+# Terminal 3: Run oracle service (uses mock Capsule API)
 IN_ENCLAVE=false python main.py
 ```
 

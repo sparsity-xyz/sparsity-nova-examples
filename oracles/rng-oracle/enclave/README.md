@@ -14,7 +14,7 @@ This service runs inside an AWS Nitro Enclave and:
 | File | Description |
 |------|-------------|
 | `main.py` | FastAPI application and event listener |
-| `nova_python_sdk/` | Vendored canonical Nova SDK (Capsule-Runtime, env helpers, RPC utilities) |
+| `nova_python_sdk/` | Vendored canonical Nova SDK (Capsule Runtime, env helpers, RPC utilities) |
 | `config.py` | Configuration settings |
 | `abi.json` | RNG contract ABI |
 | `requirements.txt` | Python dependencies |
@@ -37,7 +37,7 @@ CONTRACT_ADDRESS = "0x..."  # RNG contract address
 RPC_URL = "https://sepolia.base.org"  # RPC endpoint
 ```
 
-The Capsule-Runtime API endpoint is automatically detected:
+The Capsule API endpoint is automatically detected:
 - In enclave (when `IN_ENCLAVE=True`): `http://127.0.0.1:18000`
 - Local development: `http://capsule-runtime.sparsity.cloud:18000` (mock API)
 
@@ -87,7 +87,7 @@ When the RNG enclave service starts, it goes through the following initializatio
 ┌─────────────────────────────────────────────────────────────────┐
 │                     RNG Enclave Startup                         │
 ├─────────────────────────────────────────────────────────────────┤
-│  1. Capsule-Runtime generates random ETH wallet (secp256k1 keypair)        │
+│  1. Capsule Runtime generates random ETH wallet (secp256k1 keypair)        │
 │     └─> Wallet address: 0x...                                   │
 │                                                                 │
 │  2. Service connects to RPC and loads RNG contract              │
@@ -156,12 +156,12 @@ The service will automatically detect the authorization and begin processing req
 2. **Wait for Authorization**: Polls until TEE wallet is registered as operator
 3. **Event Listening**: Creates filter for `RandomNumberRequested` events
 4. **Random Generation**: When event received:
-   - Gets secure random bytes from enclave via Capsule-Runtime API
+   - Gets secure random bytes from enclave via Capsule API
    - Seeds Python's random module
    - Generates requested random numbers in range
 5. **Transaction Submission**:
    - Builds `fulfillRandomNumber` transaction
-   - Signs using enclave's ETH key via Capsule-Runtime API
+   - Signs using enclave's ETH key via Capsule API
    - Submits to blockchain
 6. **Callback**: Contract triggers user's callback if specified
 
@@ -169,7 +169,7 @@ The service will automatically detect the authorization and begin processing req
 
 - `fastapi` / `uvicorn` - Web framework
 - `web3` - Ethereum interaction
-- `requests` - HTTP client for Capsule-Runtime API
+- `requests` - HTTP client for Capsule API
 
 ## Environment Variables
 
@@ -179,7 +179,7 @@ The service will automatically detect the authorization and begin processing req
 
 ## For Local Development
 
-When testing locally without an actual enclave, the Capsule-Runtime class automatically uses the mock API at `http://capsule-runtime.sparsity.cloud:18000`. No configuration needed.
+When testing locally without an actual enclave, the Capsule Runtime class automatically uses the mock API at `http://capsule-runtime.sparsity.cloud:18000`. No configuration needed.
 
 ## License
 

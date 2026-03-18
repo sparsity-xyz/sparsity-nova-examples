@@ -19,7 +19,7 @@ from typing import Dict, Any, Optional
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 
-from nova_python_sdk.capsule-runtime import Capsule-Runtime
+from nova_python_sdk.capsule_runtime import CapsuleRuntime
 from ai_models.open_ai import OpenAI
 from ai_models.platform import Platform
 
@@ -33,8 +33,8 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 CORS(app)  # Allow all origins
 
-# Initialize capsule-runtime helper
-capsule-runtime = Capsule-Runtime()
+# Initialize capsule_runtime helper
+capsule_runtime = CapsuleRuntime()
 
 # Platform mapping
 PLATFORM_MAPPING: Dict[str, type] = {
@@ -52,13 +52,13 @@ def _strip_0x(value: str) -> str:
 
 
 def _decrypt_request_payload(nonce_hex: str, client_public_key_hex: str, encrypted_data_hex: str) -> Dict[str, Any]:
-    decrypted_str = capsule-runtime.decrypt(nonce_hex, client_public_key_hex, encrypted_data_hex)
+    decrypted_str = capsule_runtime.decrypt(nonce_hex, client_public_key_hex, encrypted_data_hex)
     return json.loads(decrypted_str)
 
 
 def _encrypt_response_envelope(response_data: Dict[str, Any], client_public_key_hex: str) -> Dict[str, str]:
     response_json = json.dumps(response_data, sort_keys=True, separators=(',', ':'))
-    encrypted = capsule-runtime.encrypt(response_json, client_public_key_hex)
+    encrypted = capsule_runtime.encrypt(response_json, client_public_key_hex)
     return {
         "nonce": _strip_0x(encrypted["nonce"]),
         "public_key": _strip_0x(encrypted["enclave_public_key"]),
@@ -69,7 +69,7 @@ def _encrypt_response_envelope(response_data: Dict[str, Any], client_public_key_
 def _sign_envelope(encrypted_envelope: Dict[str, str]) -> str:
     message = json.dumps(encrypted_envelope, sort_keys=True, separators=(',', ':'))
     try:
-        signed = capsule-runtime.sign_message(message)
+        signed = capsule_runtime.sign_message(message)
     except Exception as exc:
         logger.warning("Envelope signing failed: %s", exc)
         return ""
@@ -80,7 +80,7 @@ def _sign_envelope(encrypted_envelope: Dict[str, str]) -> str:
 def index():
     """Health check endpoint with service information and API key status."""
     try:
-        address = capsule-runtime.eth_address()
+        address = capsule_runtime.eth_address()
         frontend_available = os.path.exists(FRONTEND_DIR) and os.path.isfile(os.path.join(FRONTEND_DIR, 'index.html'))
         return jsonify({
             "status": "ok",
@@ -144,7 +144,7 @@ if os.getenv("IN_ENCLAVE", "false").lower() != "true":
         """
         try:
             # Get raw CBOR attestation (same format as production)
-            attestation_cbor = capsule-runtime.get_attestation()
+            attestation_cbor = capsule_runtime.get_attestation()
             
             # Return raw CBOR with proper content type
             from flask import Response
@@ -285,7 +285,7 @@ def talk():
 
 if __name__ == "__main__":
     logger.info("Starting New AI Chatbot service...")
-    logger.info(f"Capsule-Runtime endpoint: {capsule-runtime.endpoint}") # Changed CAPSULE-RUNTIME_API to capsule-runtime.endpoint
+    logger.info(f"CapsuleRuntime endpoint: {capsule_runtime.endpoint}") # Changed CAPSULE_RUNTIME_API to capsule_runtime.endpoint
     logger.info("Endpoints:")
     logger.info("  GET  /             - Health check (includes api_key_available)")
     logger.info("  POST /set-api-key  - Set API key (encrypted)")

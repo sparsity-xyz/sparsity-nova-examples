@@ -7,7 +7,7 @@ import uvicorn
 from fastapi import FastAPI, Response
 from fastapi.responses import HTMLResponse, JSONResponse
 
-from nova_python_sdk.capsule-runtime import Capsule-Runtime
+from nova_python_sdk.capsule_runtime import CapsuleRuntime
 
 
 logging.basicConfig(
@@ -19,14 +19,14 @@ logger = logging.getLogger(__name__)
 IN_ENCLAVE = os.getenv("IN_ENCLAVE", "false").lower() == "true"
 
 app = FastAPI(title="Hello World TEE", version="1.0.0")
-capsule-runtime = Capsule-Runtime()
+capsule_runtime = CapsuleRuntime()
 
 
 def read_identity() -> dict:
-    eth_res = requests.get(f"{capsule-runtime.endpoint}/v1/eth/address", timeout=10)
+    eth_res = requests.get(f"{capsule_runtime.endpoint}/v1/eth/address", timeout=10)
     eth_res.raise_for_status()
     eth_identity = eth_res.json()
-    encryption_identity = capsule-runtime.get_encryption_public_key()
+    encryption_identity = capsule_runtime.get_encryption_public_key()
 
     return {
         "wallet_address": eth_identity.get("address"),
@@ -44,7 +44,7 @@ async def root():
     try:
         identity = read_identity()
     except Exception as exc:
-        logger.exception("Failed to fetch identity from capsule-runtime")
+        logger.exception("Failed to fetch identity from capsule_runtime")
         error = str(exc)
 
     wallet_address = escape(identity.get("wallet_address") or "N/A")
@@ -53,7 +53,7 @@ async def root():
     error_block = ""
     if error:
         error_block = (
-            "<p class='error'>Failed to load identity from capsule-runtime: "
+            "<p class='error'>Failed to load identity from capsule_runtime: "
             f"{escape(error)}</p>"
         )
 

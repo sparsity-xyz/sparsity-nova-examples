@@ -2,7 +2,7 @@ import logging
 import uvicorn
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
-from nova_python_sdk.capsule-runtime import Capsule-Runtime
+from nova_python_sdk.capsule_runtime import CapsuleRuntime
 from chain import Chain
 from tasks import EchoTask
 import os
@@ -15,9 +15,9 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__)
 
 # Initialize components
-capsule-runtime = Capsule-Runtime()
+capsule_runtime = CapsuleRuntime()
 chain = Chain()
-echo_task = EchoTask(capsule-runtime, chain)
+echo_task = EchoTask(capsule_runtime, chain)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -94,7 +94,7 @@ async def get_history():
 @app.post("/.well-known/attestation")
 async def get_attestation():
     try:
-        att = capsule-runtime.get_attestation()
+        att = capsule_runtime.get_attestation()
         # Return raw binary CBOR data to match production behavior
         return Response(content=att, media_type="application/octet-stream")
     except Exception as e:

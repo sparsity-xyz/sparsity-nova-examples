@@ -12,7 +12,7 @@ from fastapi.requests import Request
 from fastapi.staticfiles import StaticFiles
 
 from config import Config
-from nova_python_sdk.capsule-runtime import Capsule-Runtime
+from nova_python_sdk.capsule_runtime import CapsuleRuntime
 
 
 logging.basicConfig(
@@ -39,7 +39,7 @@ class RandomNumberGenerator:
             abi=Config.CONTRACT_ABI,
         )
 
-        self.capsule = Capsule-Runtime()
+        self.capsule = CapsuleRuntime()
 
         # Operator account
         self.operator_address = Web3.to_checksum_address(self.capsule.eth_address())
@@ -151,7 +151,7 @@ class RandomNumberGenerator:
 
     def sign_tx(self, transaction_dict: dict) -> str:
         """
-        Sign transaction using the canonical Nova Capsule-Runtime SDK.
+        Sign transaction using the canonical Nova CapsuleRuntime SDK.
         
         Args:
             transaction_dict: Transaction dictionary with web3.py format
