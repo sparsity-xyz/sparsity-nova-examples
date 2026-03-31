@@ -3,7 +3,7 @@ Base Platform class for AI model integrations.
 """
 
 import abc
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 
 # Supported models for each platform
@@ -41,7 +41,7 @@ class Platform(abc.ABC):
         return model in self.support_models
     
     @abc.abstractmethod
-    def call(self, model: str, message: str) -> Tuple[str, int]:
+    def call(self, model: str, message: str) -> Tuple[str, Optional[int]]:
         """
         Call the AI model with a message.
         
