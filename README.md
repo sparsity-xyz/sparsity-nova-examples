@@ -45,7 +45,7 @@ At runtime:
 | App ingress | app-defined port (for example `8000`) | Yes | Published by runtime and routed by Caddy |
 | Primary API | `127.0.0.1:18000` | No | Full `/v1/*` API; loopback-only in normal deployments |
 | Aux API | `127.0.0.1:18001` | Indirectly | Runtime maps a host attestation port to `18001` and routes `/.well-known/attestation*` there |
-| Helios RPC | `127.0.0.1:18545+` | No | Public only in Nova's special mockup service |
+| Helios RPC | `127.0.0.1:18545+` | No | Public only in Nova Development Runtime |
 
 Important current behavior from `sparsity-nova-platform`:
 
@@ -227,18 +227,20 @@ CAPSULE_RUNTIME_BASE_URL = "http://127.0.0.1:18000" if IN_ENCLAVE else "http://c
 Important caveats from the current Capsule docs:
 
 - `IN_ENCLAVE` is not injected automatically by Capsule
-- the external mock service is a convenience endpoint, not the authoritative implementation
+- the shared Development Runtime runs real Capsule in Nitro; its deployed version may differ from your target version
 - you should verify important behavior against the real Capsule code or a real enclave deployment
 
-### Current Mock Endpoints Used by Examples
+### Nova Development Runtime Endpoints
 
-Nova currently operates a special mockup service that backs `capsule-runtime.sparsity.cloud`. It is useful for lightweight development loops and exposes:
+Nova currently operates a shared Nova Development Runtime that backs `capsule-runtime.sparsity.cloud`. It is useful for lightweight development loops and exposes:
 
 - Primary API: `http://capsule-runtime.sparsity.cloud:18000`
 - Aux API: `http://capsule-runtime.sparsity.cloud:18001`
 - Helios RPC presets: `http://capsule-runtime.sparsity.cloud:18545` through `:18553`
 
-Treat this as a development convenience. It is not version-locked to the Capsule repo.
+This is a real shared Capsule enclave, not a fake implementation. The local app remains outside the enclave; developers share the runtime identity and KMS namespace. It is not version-locked to the Capsule repo.
+
+The historical app formerly named `nova-kms-client` is now called **Nova KMS Integration Test**. Its recorded source at commit `5255bd4f05998d2e6c52550159afead441032f0b`, directory `nova-kms-client`, tests cross-node key consistency and KV replication. That directory is no longer present on this branch. The name change does not rename historical source paths. Ordinary `NovaKmsClient` SDK classes remain clients: they provide application access, rather than being standalone test services.
 
 ## Build Provenance in the Current Platform
 
