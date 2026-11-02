@@ -14,7 +14,8 @@ Expected balances are Alice 8750, Bob 5750 and Carol 3000 cents (total 17500).
 Use this repository, directory `sqlite-tee`, Dockerfile `Dockerfile`, app port
 8080. Enable the file proxy with mount path `/mnt/appdata`, mount name `appdata`,
 size 128 MiB and required=true. KMS, S3 and Helios may remain disabled. Build a
-version, enroll it and deploy to the Standard tier. The example refuses to start
+version and deploy to the Standard tier. On-chain enrollment is optional for
+this SQL experiment and was not used in the verified run. The example refuses to start
 without the actual mounted filesystem, so it cannot silently test only RAM.
 
 The homepage displays results. `/result` returns the captured startup checks;
