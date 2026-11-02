@@ -57,3 +57,38 @@ The crash test kills a SQLite writer during an uncommitted transaction. It is no
 a host power-failure test. Capsule's previously documented disk-full/partial-write
 behavior remains an unresolved durability concern. Do not treat this lab as
 production storage approval. Do not share one live SQLite file across enclaves.
+
+## Verified experiment, November 2, 2026
+
+The running code at commit `fd53b019ed46012cf4efb6c058bea036ad99a54a` passed:
+
+- External attested/encrypted API calls to SQLite inside a non-debug Nitro enclave.
+- Six synthetic transfers; encrypted S3 snapshot upload, read-back and restore.
+- Retry after local commit but before S3 upload, without applying a transfer twice.
+- Rejection of an older checkpoint and corrupted encrypted snapshot.
+- Recovery of a post-checkpoint transaction from an encrypted S3 journal record;
+  repeating that replay did not apply the transaction again.
+- SIGKILL of an uncommitted SQLite writer, preserving previously committed data.
+- Termination of the original EC2, automatic provisioning of a fresh EC2/enclave,
+  and restore from S3 plus the retained key and contract state. Writes were blocked
+  before the fresh enclave restored the checkpoint.
+
+The SQLite database was 315,392 bytes (308 KiB); its encrypted snapshot was
+315,425 bytes. The configured hostfs image was 128 MiB, with about 114 MiB usable
+after filesystem overhead, backed by the parent's 30-GiB EBS root volume. The
+enclave had 2 vCPUs, 5,120 MiB RAM and no swap; the disk is not all held in RAM.
+SQLite's configured page-cache target was 2 MiB. This implementation materializes
+whole backup/encryption/base64 payloads in memory, so it needs streaming changes
+before backing up databases approaching enclave RAM size.
+
+The dedicated Base Sepolia contract is
+`0x2304E3dEF91b5A477774Ca1d8DACb28785DFc433`. It recorded checkpoints at transaction
+sequences 3, 5 and 6. This contract is separate from Nova's application registry.
+The app was deployed without a paid proving or Nova registry enrollment step.
+
+This is a single-instance synthetic experiment, not a power-cut durability test
+or security audit. The public dashboard intentionally reveals synthetic balances;
+real confidential data must only be served through an authenticated encrypted API.
+The operator can authorize arbitrary commitments in this contract. A client uses
+the built image's approved PCRs and fresh attestation, not a blockchain hash alone,
+to authenticate the application receiving its data key.
