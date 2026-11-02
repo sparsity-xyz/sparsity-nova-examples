@@ -31,7 +31,7 @@ def connect(path):
     return c
 
 class Lab:
-    def __init__(self): self.ready=False; self.lock=threading.Lock(); self.seen=set(); self.report={}
+    def __init__(self): self.ready=False; self.needs_restore=True; self.lock=threading.Lock(); self.seen=set(); self.report={}
     def initialize(self,cfg):
         if self.ready: raise ValueError('already initialized')
         if not HOST.is_mount(): raise ValueError('hostfs missing')
@@ -53,6 +53,7 @@ class Lab:
         # Round-trip ciphertext only; this checks actual S3 transport inside Nitro.
         raw=self.encrypt(b's3-encryption-probe','probe',0)
         k=self.prefix+'probe/'+sha(raw)+'.bin';self.put(k,raw);assert self.get(k)==raw
+        self.needs_restore=self.chain()['epoch']>0
         return self.stats()
     def create(self,path):
         c=connect(path)
@@ -101,7 +102,7 @@ class Lab:
         finally: c.close()
     def chain(self):
         payload={'jsonrpc':'2.0','id':1,'method':'eth_call','params':[{'to':self.contract,'data':self.selector},'latest']}
-        req=urllib.request.Request('https://sepolia.base.org',data=canonical(payload),headers={'Content-Type':'application/json'})
+        req=urllib.request.Request('https://sepolia.base.org',data=canonical(payload),headers={'Content-Type':'application/json','User-Agent':'nova-sqlite-lab'})
         with urllib.request.urlopen(req,timeout=30) as r: v=json.loads(r.read())
         if 'error' in v:raise ValueError('chain RPC failed')
         raw=bytes.fromhex(v['result'][2:]);assert len(raw)==128
@@ -139,7 +140,7 @@ class Lab:
             assert self.head(c)==(m['seq'],m['log_head'])
         finally:c.close()
         # Publish the new DB only after verification. Historical test files remain.
-        old=str(self.db);self.db=path
+        old=str(self.db);self.db=path;self.needs_restore=False
         return {'restored_from_s3':True,'old_database':old,'new_database':str(path),'anchor':latest,'stats':self.stats()}
     def replay(self,q):
         c=connect(self.db);applied=0;duplicates=0
@@ -185,6 +186,8 @@ print('uncommitted',flush=True);time.sleep(60)
         if action=='initialize':return self.initialize(q)
         if not self.ready:raise ValueError('initialize first')
         if action=='stats':return self.stats()
+        if self.needs_restore and action not in ('restore','chain'):
+            raise ValueError('restore the latest on-chain checkpoint before writes after restart')
         if action=='transfer':return self.transfer(q)
         if action=='checkpoint':return self.checkpoint()
         if action=='restore':return self.restore(q)
