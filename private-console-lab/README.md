@@ -31,3 +31,5 @@ Build this directory with the normal Nova App Hub workflow. Use application port
 8080 and Standard enclave capacity (2 vCPU, 5 GiB); disable optional KMS, Helios,
 S3 and hostfs integrations. `policy.json` pins one lab client and package, so another
 experiment must generate its own policy and retain the private client key outside Git.
+
+The upload key is bound in Nitro attestation's actual `public_key` field, not merely `user_data`. Capsule permits external callers to supply attestation metadata, so metadata alone is not an authenticated transport identity. The client checks the DER-encoded X25519 key exactly; Capsule's external Aux API strips public-key overrides.

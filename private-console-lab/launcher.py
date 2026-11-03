@@ -151,7 +151,11 @@ class Handler(BaseHTTPRequestHandler):
                 if len(nonce) != 32:
                     raise ValueError('Invalid challenge')
                 req = urllib.request.Request('http://127.0.0.1:18000/v1/attestation',
-                    data=canonical({'nonce': q['nonce'], 'user_data': {
+                    # Bind the key in NSM's public_key field, not caller-supplied user_data alone.
+                    # Capsule's external Aux API strips public_key overrides.
+                    data=canonical({'nonce': q['nonce'],
+                        'public_key': SERVER.public_key().public_bytes(serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo).decode(),
+                        'user_data': {
                         'console_loader_key_sha256': hashlib.sha256(PUBLIC).hexdigest(),
                         'boot': BOOT, 'package_sha256': POLICY['package_sha256']}}),
                     headers={'Content-Type': 'application/json'})
