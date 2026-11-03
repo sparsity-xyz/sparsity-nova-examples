@@ -6,8 +6,8 @@ It lets the normal Nova app deployment workflow provision the test enclave,
 without needing an operator to start a separate EC2 manually.
 
 The operator verifies a fresh Nitro attestation against the build's PCRs and the
-pinned AWS root. Attested user data binds the launcher's ephemeral X25519 key,
-boot ID and approved private-package hash. A single client public key is pinned
+pinned AWS root. The attestation public-key field binds the launcher's ephemeral X25519 key;
+user data also records the boot ID and approved private-package hash. A single client public key is pinned
 in `policy.json`. Requests and responses use separately derived AES-256-GCM keys;
 responses bind the request nonce and replays are rejected within the boot.
 
@@ -32,4 +32,4 @@ Build this directory with the normal Nova App Hub workflow. Use application port
 S3 and hostfs integrations. `policy.json` pins one lab client and package, so another
 experiment must generate its own policy and retain the private client key outside Git.
 
-The upload key is bound in Nitro attestation's actual `public_key` field, not merely `user_data`. Capsule permits external callers to supply attestation metadata, so metadata alone is not an authenticated transport identity. The client checks the DER-encoded X25519 key exactly; Capsule's external Aux API strips public-key overrides.
+The upload key is bound in Nitro attestation's actual `public_key` field, not merely `user_data`. Capsule permits external callers to supply attestation metadata, so metadata alone is not an authenticated transport identity. The client checks the raw 32-byte X25519 key exactly (Capsule extracts these bytes from the submitted PEM); Capsule's external Aux API strips public-key overrides.
